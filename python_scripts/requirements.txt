@@ -1,0 +1,4 @@
+﻿deepface==0.0.75
+tensorflow==2.13.0
+opencv-python==4.8.0.74
+Pillow==9.5.0

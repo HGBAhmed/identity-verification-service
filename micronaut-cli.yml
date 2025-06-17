@@ -1,0 +1,6 @@
+applicationType: default
+defaultPackage: sn.sensoft.identity
+testFramework: junit
+sourceLanguage: java
+buildTool: gradle
+features: [app-name, data, data-jdbc, flyway, gradle, http-client, jackson-databind, java, java-application, jdbc-hikari, json-schema, json-schema-validation, junit, logback, micronaut-aot, micronaut-build, micronaut-http-validation, netty-server, postgres, properties, readme, shade, static-resources, test-resources, validation]
