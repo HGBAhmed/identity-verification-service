@@ -1,7 +1,7 @@
 plugins {
     id("io.micronaut.application") version "4.5.3"
     id("com.gradleup.shadow") version "8.3.6"
-    id("io.micronaut.test-resources") version "4.5.3"
+    //id("io.micronaut.test-resources") version "4.5.3"
     id("io.micronaut.aot") version "4.5.3"
 }
 
@@ -14,7 +14,7 @@ repositories {
 
 dependencies {
     // Annotation Processors
-    annotationProcessor("io.micronaut.data:micronaut-data-processor")
+    //annotationProcessor("io.micronaut.data:micronaut-data-processor")
     annotationProcessor("io.micronaut:micronaut-http-validation")
     annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
     annotationProcessor("io.micronaut.validation:micronaut-validation-processor")
@@ -25,16 +25,18 @@ dependencies {
 
     // Sérialisation JSON
     implementation("io.micronaut.serde:micronaut-serde-jackson")
+    // Injection de dépendances
+    implementation("jakarta.inject:jakarta.inject-api:2.0.1")
 
     // Database & JPA
-    implementation("io.micronaut.data:micronaut-data-jdbc")
-    implementation("io.micronaut.data:micronaut-data-hibernate-jpa")
-    implementation("io.micronaut.data:micronaut-data-tx")
-    implementation("io.micronaut.sql:micronaut-jdbc-hikari")
-    implementation("io.micronaut.flyway:micronaut-flyway")
+    //implementation("io.micronaut.data:micronaut-data-jdbc")
+    //implementation("io.micronaut.data:micronaut-data-hibernate-jpa")
+    //implementation("io.micronaut.data:micronaut-data-tx")
+    //implementation("io.micronaut.sql:micronaut-jdbc-hikari")
+    //implementation("io.micronaut.flyway:micronaut-flyway")
 
     // JPA API
-    implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
+    //implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
 
     // Validation
     implementation("io.micronaut.validation:micronaut-validation")
@@ -42,8 +44,8 @@ dependencies {
 
     // Logging
     runtimeOnly("ch.qos.logback:logback-classic")
-    runtimeOnly("org.flywaydb:flyway-database-postgresql")
-    runtimeOnly("org.postgresql:postgresql")
+    //runtimeOnly("org.flywaydb:flyway-database-postgresql")
+    //runtimeOnly("org.postgresql:postgresql")
 
     // Test
     testImplementation("io.micronaut:micronaut-http-client")
@@ -80,6 +82,10 @@ micronaut {
     }
 }
 
+tasks.withType(JavaCompile) {
+    options.compilerArgs += ['-Xlint:unchecked']
+    options.encoding = 'UTF-8'
+}
 tasks.named("dockerfileNative") {
     jdkVersion = "21"
 }

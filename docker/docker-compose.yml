@@ -4,14 +4,15 @@ services:
     image: postgres:15
     environment:
       POSTGRES_DB: identity_verification
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U myuser -d identity_verification"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -27,18 +27,18 @@ public class FaceComparisonService {
         );
 
         Process process = processBuilder.start();
-        boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+        boolean finished = process.waitFor(300, TimeUnit.SECONDS); // 5 minutes
 
         if (!finished) {
             process.destroyForcibly();
-            throw new RuntimeException("Face comparison timeout");
+            throw new RuntimeException("Face comparison timeout after 300 seconds");
         }
 
         String output = new String(process.getInputStream().readAllBytes());
         String errorOutput = new String(process.getErrorStream().readAllBytes());
 
         if (process.exitValue() != 0) {
-            throw new RuntimeException("Python script failed: " + errorOutput);
+            throw new RuntimeException("Python script failed. Error: " + errorOutput + ". Output: " + output);
         }
 
         return parseComparisonResult(output);
@@ -46,7 +46,24 @@ public class FaceComparisonService {
 
     private FaceComparisonResult parseComparisonResult(String output) throws IOException {
         try {
-            Map<String, Object> jsonNode = objectMapper.readValue(output, Map.class);
+            // Extraire seulement la dernière ligne (le JSON)
+            String[] lines = output.trim().split("\\r?\\n");
+            String jsonLine = "";
+
+            // Chercher la ligne qui contient le JSON (commence par {)
+            for (String line : lines) {
+                if (line.trim().startsWith("{")) {
+                    jsonLine = line.trim();
+                }
+            }
+
+            if (jsonLine.isEmpty()) {
+                throw new IOException("No JSON found in output: " + output);
+            }
+
+            System.out.println("JSON extrait: " + jsonLine);
+
+            Map<String, Object> jsonNode = objectMapper.readValue(jsonLine, Map.class);
 
             FaceComparisonResult result = new FaceComparisonResult();
             result.setVerified((Boolean) jsonNode.get("verified"));
