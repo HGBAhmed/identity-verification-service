@@ -142,6 +142,7 @@ public class IdentityVerificationController {
     @Get("/result/{requestId}")
     public HttpResponse<VerificationResultDto> getResult(@PathVariable String requestId) {
         try {
+
             System.out.println("Recherche résultat pour requestId: " + requestId);
 
             var result = resultService.getResult(requestId);
