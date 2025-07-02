@@ -14,7 +14,7 @@ repositories {
 
 dependencies {
     // Annotation Processors
-    //annotationProcessor("io.micronaut.data:micronaut-data-processor")
+    annotationProcessor("io.micronaut.data:micronaut-data-processor")
     annotationProcessor("io.micronaut:micronaut-http-validation")
     annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
     annotationProcessor("io.micronaut.validation:micronaut-validation-processor")
@@ -25,27 +25,30 @@ dependencies {
 
     // Sérialisation JSON
     implementation("io.micronaut.serde:micronaut-serde-jackson")
-    // Injection de dépendances
     implementation("jakarta.inject:jakarta.inject-api:2.0.1")
 
     // Database & JPA
-    //implementation("io.micronaut.data:micronaut-data-jdbc")
-    //implementation("io.micronaut.data:micronaut-data-hibernate-jpa")
-    //implementation("io.micronaut.data:micronaut-data-tx")
-    //implementation("io.micronaut.sql:micronaut-jdbc-hikari")
-    //implementation("io.micronaut.flyway:micronaut-flyway")
+    implementation("io.micronaut.data:micronaut-data-jdbc")
+    implementation("io.micronaut.data:micronaut-data-hibernate-jpa")
+    implementation("io.micronaut.data:micronaut-data-tx")
+    implementation("io.micronaut.sql:micronaut-jdbc-hikari")
+    implementation("io.micronaut.flyway:micronaut-flyway")
 
     // JPA API
-    //implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
+    implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
 
     // Validation
     implementation("io.micronaut.validation:micronaut-validation")
     implementation("jakarta.validation:jakarta.validation-api")
 
-    // Logging
+    // Runtime
     runtimeOnly("ch.qos.logback:logback-classic")
-    //runtimeOnly("org.flywaydb:flyway-database-postgresql")
-    //runtimeOnly("org.postgresql:postgresql")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
+    //runtimeOnly("com.h2database:h2")
+    runtimeOnly("org.postgresql:postgresql")
+
+    // OpenKM Client HTTP
+    implementation("io.micronaut:micronaut-http-client")
 
     // Test
     testImplementation("io.micronaut:micronaut-http-client")
@@ -86,6 +89,7 @@ tasks.withType(JavaCompile) {
     options.compilerArgs += ['-Xlint:unchecked']
     options.encoding = 'UTF-8'
 }
+
 tasks.named("dockerfileNative") {
     jdkVersion = "21"
 }

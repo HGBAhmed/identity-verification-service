@@ -1,0 +1,105 @@
+﻿version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: identity-verification-db
+    environment:
+      POSTGRES_DB: identity_verification
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - identity-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d identity_verification"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  openkm:
+    image: openkm/openkm-ce:6.3
+    container_name: identity-verification-openkm
+    environment:
+      - DB_HOST=openkm-db
+      - DB_NAME=openkm
+      - DB_USER=openkm
+      - DB_PASS=openkm123
+      - JAVA_OPTS=-Xmx1536m -Xms512m
+    ports:
+      - "8080:8080"
+    volumes:
+      - openkm_data:/opt/openkm
+      - openkm_repository:/opt/openkm/repository
+    networks:
+      - identity-network
+    depends_on:
+      openkm-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Base de données pour OpenKM
+  openkm-db:
+    image: postgres:13-alpine
+    container_name: identity-verification-openkm-db
+    environment:
+      POSTGRES_DB: openkm
+      POSTGRES_USER: openkm
+      POSTGRES_PASSWORD: openkm123
+    volumes:
+      - openkm_db_data:/var/lib/postgresql/data
+    networks:
+      - identity-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openkm -d openkm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PGADMIN (UTILE pour debug)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: identity-verification-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@identity.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - identity-network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+# VOLUMES PERSISTANTS
+
+volumes:
+  postgres_data:
+    driver: local
+  openkm_data:
+    driver: local
+  openkm_repository:
+    driver: local
+  openkm_db_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+# RÉSEAU
+networks:
+  identity-network:
+    driver: bridge

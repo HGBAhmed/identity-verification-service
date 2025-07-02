@@ -1,0 +1,66 @@
+﻿services:
+  # Base de données OpenKM
+  openkm-db:
+    image: postgres:15-alpine
+    container_name: openkm-db
+    environment:
+      POSTGRES_DB: openkm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"  # Port différent pour éviter conflit
+    volumes:
+      - openkm_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d openkm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OpenKM Application
+  openkm:
+    image: openkm/openkm-ce:6.3.12
+    container_name: openkm-app
+    environment:
+      # Configuration base de données
+      OPENKM_DB_HOST: openkm-db
+      OPENKM_DB_PORT: 5432
+      OPENKM_DB_NAME: openkm
+      OPENKM_DB_USER: postgres
+      OPENKM_DB_PASS: postgres
+
+      # Configuration OpenKM
+      OPENKM_ADMIN_USER: okmAdmin
+      OPENKM_ADMIN_PASS: admin
+      OPENKM_CONTEXT: OpenKM
+
+      # Configuration Java
+      JAVA_OPTS: "-Xmx2g -Xms1g"
+
+      # Configuration repository
+      OPENKM_REPOSITORY_PATH: /opt/openkm/repository
+
+    ports:
+      - "8090:8080"  # OpenKm port 8090
+    volumes:
+      - openkm_data:/opt/openkm/repository
+      - openkm_logs:/opt/openkm/logs
+    depends_on:
+      openkm-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  openkm_db_data:
+    driver: local
+  openkm_data:
+    driver: local
+  openkm_logs:
+    driver: local

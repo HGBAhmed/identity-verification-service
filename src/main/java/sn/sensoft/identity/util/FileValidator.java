@@ -45,6 +45,19 @@ public class FileValidator {
         return null;
     }
 
+    // Méthode validateFile() nécessaire pour FileStorageService
+    public ValidationResult validateFile(CompletedFileUpload file, long maxSize) {
+        if (!isValidExtension(file)) {
+            return ValidationResult.invalid("Extension de fichier non autorisée. Extensions acceptées: " + allowedExtensions);
+        }
+
+        if (file.getSize() > maxSize) {
+            return ValidationResult.invalid("Fichier trop volumineux. Taille maximum: " + formatFileSize(maxSize));
+        }
+
+        return ValidationResult.valid();
+    }
+
     private long parseFileSize(String size) {
         size = size.toUpperCase();
         if (size.endsWith("MB")) {
@@ -62,5 +75,32 @@ public class FileValidator {
             return (bytes / 1024) + "KB";
         }
         return bytes + " bytes";
+    }
+
+    // Classe ValidationResult
+    public static class ValidationResult {
+        private final boolean valid;
+        private final String errorMessage;
+
+        private ValidationResult(boolean valid, String errorMessage) {
+            this.valid = valid;
+            this.errorMessage = errorMessage;
+        }
+
+        public static ValidationResult valid() {
+            return new ValidationResult(true, null);
+        }
+
+        public static ValidationResult invalid(String errorMessage) {
+            return new ValidationResult(false, errorMessage);
+        }
+
+        public boolean isValid() {
+            return valid;
+        }
+
+        public String getErrorMessage() {
+            return errorMessage;
+        }
     }
 }
