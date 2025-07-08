@@ -193,7 +193,7 @@ public class OpenKMService {
 
             String auth = Base64.getEncoder().encodeToString((username + ":" + password).getBytes());
 
-            // Essayer d'abord avec l'UUID (méthode recommandée)
+            // Essayer d'abord avec l'UUID
             TempFileResult resultByUuid = downloadByUuid(openkmUuid, auth);
             if (resultByUuid.isSuccess()) {
                 return resultByUuid;
