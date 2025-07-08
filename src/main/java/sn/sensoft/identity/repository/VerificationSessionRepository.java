@@ -34,6 +34,7 @@ public interface VerificationSessionRepository extends JpaRepository<Verificatio
 
     // Vérifier existence
     boolean existsBySessionId(String sessionId);
+
     // à ajouter parce que apparemment pas pris en compte par micronaut
     VerificationSession update(VerificationSession session);
 }

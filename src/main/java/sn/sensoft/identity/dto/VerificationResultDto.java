@@ -7,7 +7,7 @@ import java.util.Map;
 @Serdeable
 public class VerificationResultDto {
 
-    private String requestId; // Changé de UUID à String
+    private String requestId;
     private String userIdentifier;
     private String status;
     private Double confidenceScore;
@@ -16,19 +16,19 @@ public class VerificationResultDto {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    // Nouvelles propriétés pour l'extraction de document
+    //  propriétés pour l'extraction de document
     private FaceComparisonData faceComparison;
     private DocumentExtractionData documentData;
 
     public VerificationResultDto() {}
 
-    public VerificationResultDto(String requestId, String userIdentifier, String status) { // UUID à String
+    public VerificationResultDto(String requestId, String userIdentifier, String status) {
         this.requestId = requestId;
         this.userIdentifier = userIdentifier;
         this.status = status;
     }
 
-    public static VerificationResultDto success(String requestId, String userIdentifier, //  UUID à String
+    public static VerificationResultDto success(String requestId, String userIdentifier,
                                                 Double confidence, Boolean isMatch) {
         VerificationResultDto dto = new VerificationResultDto(requestId, userIdentifier, "COMPLETED");
         dto.confidenceScore = confidence;
@@ -37,7 +37,7 @@ public class VerificationResultDto {
         return dto;
     }
 
-    public static VerificationResultDto successWithData(String requestId, String userIdentifier, // Changé UUID à String
+    public static VerificationResultDto successWithData(String requestId, String userIdentifier,
                                                         Double faceConfidence, Boolean isMatch,
                                                         Map<String, Object> documentExtractedData,
                                                         String documentType, String issuingCountry) {
@@ -105,7 +105,7 @@ public class VerificationResultDto {
         public void setExtractedFields(Map<String, Object> extractedFields) { this.extractedFields = extractedFields; }
     }
 
-    // Getters et Setters existants
+    // Getters et Setters
     public String getRequestId() { return requestId; } // Changé UUID à String
     public void setRequestId(String requestId) { this.requestId = requestId; }
 

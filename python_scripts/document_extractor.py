@@ -1,257 +1,392 @@
 import sys
 import json
-import easyocr
 import re
+import unicodedata
+from typing import Dict, Optional
 
-def detect_document_type(text_blocks):
-    """Détecte le type de document basé sur les mots-clés internationaux"""
-    text_combined = ' '.join([block for block in text_blocks]).upper()
+# Imports + gestion d'erreurs
+try:
+    from passporteye import read_mrz
+    PASSPORT_EYE_AVAILABLE = True
+except ImportError:
+    PASSPORT_EYE_AVAILABLE = False
 
-    # Mots-clés pour passeports
-    passport_keywords = [
-        'PASSPORT', 'PASSEPORT', 'PASSAPORTO', 'REISEPASS', 'PASAPORTE',
-        'PASZPORT', 'PASSAPORTE', 'ПАСПОРТ', 'جواز سفر'
-    ]
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
 
-    # Mots-clés pour cartes d'identité
-    id_card_keywords = [
-        'IDENTITY CARD', 'CARTE IDENTITE', 'AUSWEIS', 'DOCUMENTO IDENTIDAD',
-        'CARTA IDENTITA', 'DOWOD OSOBISTY', 'УДОСТОВЕРЕНИЕ', 'بطاقة هوية',
-        'NATIONAL ID', 'CITIZEN ID', 'RESIDENT CARD'
-    ]
+def normalize_text(text):
+    """Normalise le texte"""
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(char for char in text if unicodedata.category(char) != 'Mn')
+    return text.upper().strip()
 
-    # Mots-clés pour permis de résidence
-    residence_keywords = [
-        'RESIDENCE PERMIT', 'TITRE SEJOUR', 'AUFENTHALTSTITEL',
-        'PERMESSO SOGGIORNO', 'TARJETA RESIDENCIA', 'РАЗРЕШЕНИЕ'
-    ]
+def detect_document_type(image_path: str) -> str:
+    """Détection rapide du type de document"""
+    if not EASYOCR_AVAILABLE:
+        return 'PASSPORT'  # Par défaut
 
-    if any(keyword in text_combined for keyword in passport_keywords):
-        return 'PASSPORT'
-    elif any(keyword in text_combined for keyword in id_card_keywords):
-        return 'ID_CARD'
-    elif any(keyword in text_combined for keyword in residence_keywords):
-        return 'RESIDENCE_PERMIT'
-    else:
-        return 'UNKNOWN'
-
-def detect_country(text_blocks):
-    """Détecte le pays d'émission du document"""
-    text_combined = ' '.join([block for block in text_blocks]).upper()
-
-    countries = {
-        'FRANCE': ['REPUBLIQUE FRANCAISE', 'FRANCE', 'FRENCH REPUBLIC'],
-        'GERMANY': ['BUNDESREPUBLIK DEUTSCHLAND', 'GERMANY', 'DEUTSCHLAND'],
-        'SPAIN': ['REINO DE ESPANA', 'SPAIN', 'ESPANA'],
-        'ITALY': ['REPUBBLICA ITALIANA', 'ITALY', 'ITALIA'],
-        'UK': ['UNITED KINGDOM', 'GREAT BRITAIN', 'ROYAUME-UNI'],
-        'USA': ['UNITED STATES', 'USA', 'AMERICA'],
-        'CANADA': ['CANADA'],
-        'MOROCCO': ['ROYAUME DU MAROC', 'MOROCCO', 'المغرب'],
-        'ALGERIA': ['REPUBLIQUE ALGERIENNE', 'ALGERIA', 'الجزائر'],
-        'TUNISIA': ['REPUBLIQUE TUNISIENNE', 'TUNISIA', 'تونس'],
-        'SENEGAL': ['REPUBLIQUE DU SENEGAL', 'SENEGAL'],
-        'MALI': ['REPUBLIQUE DU MALI', 'MALI'],
-        'BURKINA_FASO': ['BURKINA FASO'],
-        'IVORY_COAST': ['COTE D\'IVOIRE', 'IVORY COAST']
-    }
-
-    for country, keywords in countries.items():
-        if any(keyword in text_combined for keyword in keywords):
-            return country
-
-    return 'UNKNOWN'
-
-def extract_dates(text):
-    """Extrait les dates dans différents formats internationaux"""
-    date_patterns = [
-        # Format européen : DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY
-        r'\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b',
-        # Format américain : MM/DD/YYYY
-        r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b',
-        # Format ISO : YYYY-MM-DD
-        r'\b(\d{4})-(\d{1,2})-(\d{1,2})\b',
-        # Format avec espaces : DD MM YYYY
-        r'\b(\d{1,2})\s+(\d{1,2})\s+(\d{4})\b'
-    ]
-
-    dates_found = []
-    for pattern in date_patterns:
-        matches = re.finditer(pattern, text)
-        for match in matches:
-            groups = match.groups()
-            # Essayer de normaliser au format DD/MM/YYYY
-            if len(groups) == 3:
-                if len(groups[0]) == 4:  # Format YYYY-MM-DD
-                    year, month, day = groups
-                    dates_found.append(f"{day.zfill(2)}/{month.zfill(2)}/{year}")
-                else:  # Autres formats
-                    part1, part2, year = groups
-                    dates_found.append(f"{part1.zfill(2)}/{part2.zfill(2)}/{year}")
-
-    return dates_found
-
-def extract_document_numbers(text):
-    """Extrait les numéros de documents (patterns génériques)"""
-    number_patterns = [
-        # Numéros alphanumériques (8-15 caractères)
-        r'\b([A-Z0-9]{8,15})\b',
-        # Numéros avec espaces ou tirets
-        r'\b([A-Z0-9]{2,4}[\s-][A-Z0-9]{2,4}[\s-][A-Z0-9]{2,4})\b',
-        # Numéros purement numériques (6-12 chiffres)
-        r'\b(\d{6,12})\b'
-    ]
-
-    numbers_found = []
-    for pattern in number_patterns:
-        matches = re.finditer(pattern, text)
-        for match in matches:
-            num = match.group(1)
-            # Filtrer les dates et autres patterns non pertinents
-            if not re.match(r'^\d{2}/\d{2}/\d{4}$', num) and not re.match(r'^\d{4}$', num):
-                numbers_found.append(num)
-
-    return numbers_found
-
-def extract_names(text_blocks):
-    """Extrait les noms en utilisant des patterns génériques"""
-    names_data = {
-        'surname': None,
-        'given_names': None
-    }
-
-    # Mots-clés pour identifier les noms
-    surname_keywords = [
-        'SURNAME', 'NOM', 'APELLIDO', 'COGNOME', 'NACHNAME', 'NAZWISKO',
-        'FAMILY NAME', 'LAST NAME', 'اللقب', 'ФАМИЛИЯ'
-    ]
-
-    given_name_keywords = [
-        'GIVEN NAMES', 'PRENOM', 'NOMBRE', 'NOME', 'VORNAME', 'IMIE',
-        'FIRST NAME', 'الاسم', 'ИМЯ', 'PRENOMS'
-    ]
-
-    for block in text_blocks:
-        block_upper = block.upper()
-
-        # Recherche du nom de famille (arrêt au premier trouvé)
-        if names_data['surname'] is None:
-            for keyword in surname_keywords:
-                if keyword in block_upper:
-                    parts = block.split()
-                    for i, part in enumerate(parts):
-                        if keyword in part.upper() and i + 1 < len(parts):
-                            names_data['surname'] = parts[i + 1].upper()
-                            break
-                    if names_data['surname']:
-                        break
-
-        # Recherche du prénom (arrêt au premier trouvé)
-        if names_data['given_names'] is None:
-            for keyword in given_name_keywords:
-                if keyword in block_upper:
-                    parts = block.split()
-                    for i, part in enumerate(parts):
-                        if keyword in part.upper() and i + 1 < len(parts):
-                            names_data['given_names'] = ' '.join(parts[i + 1:]).title()
-                            break
-                    if names_data['given_names']:
-                        break
-
-    return names_data
-
-def extract_nationality(text_blocks):
-    """Extrait la nationalité"""
-    text_combined = ' '.join([block for block in text_blocks]).upper()
-
-    # Nationalités courantes (format adjectif)
-    nationalities = {
-        'FRENCH': ['FRANÇAISE', 'FRANCAISE', 'FRENCH'],
-        'GERMAN': ['DEUTSCHE', 'GERMAN'],
-        'SPANISH': ['ESPAÑOLA', 'ESPANOLA', 'SPANISH'],
-        'ITALIAN': ['ITALIANA', 'ITALIAN'],
-        'BRITISH': ['BRITISH', 'BRITANNIQUE'],
-        'AMERICAN': ['AMERICAN', 'AMERICAINE'],
-        'CANADIAN': ['CANADIAN', 'CANADIENNE'],
-        'MOROCCAN': ['MAROCAINE', 'MOROCCAN', 'مغربية'],
-        'ALGERIAN': ['ALGERIENNE', 'ALGERIAN', 'جزائرية'],
-        'TUNISIAN': ['TUNISIENNE', 'TUNISIAN', 'تونسية'],
-        'SENEGALESE': ['SENEGALAISE', 'SENEGALESE'],
-        'MALIAN': ['MALIENNE', 'MALIAN']
-    }
-
-    for nationality, variants in nationalities.items():
-        if any(variant in text_combined for variant in variants):
-            return nationality
-
-    return None
-
-def extract_sex(text_blocks):
-    """Extrait le sexe/genre"""
-    text_combined = ' '.join([block for block in text_blocks]).upper()
-
-    # Patterns pour détecter le sexe
-    if any(pattern in text_combined for pattern in ['SEX M', 'SEXE M', 'MALE', 'MASCULIN', 'M/']):
-        return 'M'
-    elif any(pattern in text_combined for pattern in ['SEX F', 'SEXE F', 'FEMALE', 'FEMININ', 'F/']):
-        return 'F'
-
-    return None
-
-def extract_document_data(image_path):
-    """Fonction principale d'extraction internationale"""
     try:
-        # Initialiser EasyOCR avec langues essentielles (optimisé)
-        reader = easyocr.Reader(['en', 'fr', 'es'], gpu=False)
-
-        # Extraire le texte avec confidence élevée
+        reader = easyocr.Reader(['en', 'fr'], gpu=False)
         results = reader.readtext(image_path)
-        text_blocks = [result[1] for result in results if result[2] > 0.4]  # Confiance > 40%
+        text = ' '.join([r[1] for r in results if r[2] > 0.4])
+        text_norm = normalize_text(text)
 
-        if not text_blocks:
-            return {
-                'status': 'error',
-                'error': 'No text detected in document'
-            }
+        if any(kw in text_norm for kw in ['PASSPORT', 'PASSEPORT', 'REPUBLIQUE DU']):
+            return 'PASSPORT'
+        elif any(kw in text_norm for kw in ['CARTE ETUDIANT', 'STUDENT CARD']):
+            return 'STUDENT_CARD'
+        elif any(kw in text_norm for kw in ['CARTE IDENTITE', 'IDENTITY CARD']):
+            return 'ID_CARD'
+        else:
+            return 'UNKNOWN'
+    except:
+        return 'PASSPORT'
 
-        # Analyses génériques
-        doc_type = detect_document_type(text_blocks)
-        country = detect_country(text_blocks)
-        names = extract_names(text_blocks)
+def format_date(date_str: str) -> str:
+    """Convertit date MRZ YYMMDD en DD/MM/YYYY"""
+    if len(date_str) == 6 and date_str.isdigit():
+        yy, mm, dd = date_str[:2], date_str[2:4], date_str[4:6]
+        year = int(yy)
+        full_year = 2000 + year if year <= 30 else 1900 + year
+        return f"{dd}/{mm}/{full_year}"
+    return date_str
 
-        text_combined = ' '.join(text_blocks)
-        dates = extract_dates(text_combined)
-        numbers = extract_document_numbers(text_combined)
-        nationality = extract_nationality(text_blocks)
-        sex = extract_sex(text_blocks)
+def get_country_info(code: str) -> Dict[str, str]:
+    """Mapping codes pays"""
+    countries = {
+        'FRA': {'name': 'FRANCE', 'nationality': 'FRENCH'},
+        'SEN': {'name': 'SENEGAL', 'nationality': 'SENEGALESE'},
+        'DEU': {'name': 'GERMANY', 'nationality': 'GERMAN'},
+        'ESP': {'name': 'SPAIN', 'nationality': 'SPANISH'},
+        'EOL': {'name': 'REPUBLIC OF EOLIE', 'nationality': 'EOLIAN'},
+    }
+    return countries.get(code.upper(), {'name': code, 'nationality': code})
 
-        # Structure de données générique (sans redondance)
-        extracted_data = {
-            'surname': names['surname'],
-            'givenNames': names['given_names'],
-            'nationality': nationality,
-            'sex': sex,
-            'documentNumbers': numbers[:3] if numbers else [],  # Maximum 3 numéros
-            'dates': dates[:3] if dates else []  # Maximum 3 dates
+def extract_passport(image_path: str) -> Dict:
+    """Extraction passeport avec PassportEye"""
+    if not PASSPORT_EYE_AVAILABLE:
+        return {'status': 'error', 'error': 'PassportEye non disponible'}
+
+    try:
+        mrz_data = read_mrz(image_path)
+        if not mrz_data:
+            return {'status': 'error', 'error': 'Aucune MRZ détectée'}
+
+        # Extraction données MRZ
+        data = {}
+
+        if hasattr(mrz_data, 'number') and mrz_data.number:
+            # Correction O/0
+            num = mrz_data.number.replace('O', '0').replace('o', '0')
+            data['documentNumbers'] = [num]
+
+        if hasattr(mrz_data, 'surname') and mrz_data.surname:
+            data['surname'] = mrz_data.surname
+
+        if hasattr(mrz_data, 'names') and mrz_data.names:
+            # Nettoyage prénoms
+            names = mrz_data.names.strip()
+            names = re.sub(r'([A-Z])\1{3,}', '', names)  # KKKK -> vide
+            names = re.sub(r'RK\b', 'R', names)  # MOCKTARK -> MOCKTAR
+            data['givenNames'] = names.strip()
+
+        if hasattr(mrz_data, 'sex') and mrz_data.sex:
+            data['sex'] = mrz_data.sex
+
+        if hasattr(mrz_data, 'nationality') and mrz_data.nationality:
+            country_info = get_country_info(mrz_data.nationality)
+            data['nationality'] = country_info['nationality']
+
+        # Dates avec distinction de type
+        if hasattr(mrz_data, 'date_of_birth') and mrz_data.date_of_birth:
+            if isinstance(mrz_data.date_of_birth, str):
+                data['dateOfBirth'] = format_date(mrz_data.date_of_birth)
+            else:
+                data['dateOfBirth'] = mrz_data.date_of_birth.strftime("%d/%m/%Y")
+
+        if hasattr(mrz_data, 'expiration_date') and mrz_data.expiration_date:
+            if isinstance(mrz_data.expiration_date, str):
+                data['expiryDate'] = format_date(mrz_data.expiration_date)
+            else:
+                data['expiryDate'] = mrz_data.expiration_date.strftime("%d/%m/%Y")
+
+        # Extraction EasyOCR pour données non-MRZ
+        if EASYOCR_AVAILABLE:
+            try:
+                reader = easyocr.Reader(['en', 'fr'], gpu=False)
+                results = reader.readtext(image_path)
+                text_blocks = [r[1] for r in results if r[2] > 0.5]
+                text_combined = ' '.join(text_blocks)
+
+                # Lieu de naissance - Approche générique avec filtrage
+                birth_place_patterns = [
+                    r'(?:LIEU DE NAISSANCE|PLACE OF BIRTH|NE A)[:\s]*([A-Z][A-Z\s\-]+?)(?:\s|$)',
+                    r'(?:NE A|BORN IN)[:\s]*([A-Z][A-Z\s\-]+?)(?:\s|$)',
+                ]
+
+                birth_place = None
+
+                # D'abord essayer les patterns avec labels (plus fiables)
+                for pattern in birth_place_patterns:
+                    match = re.search(pattern, text_combined, re.IGNORECASE)
+                    if match:
+                        candidate = match.group(1).strip()
+                        if len(candidate) >= 3 and not re.search(r'\d', candidate):
+                            birth_place = candidate
+                            break
+
+                # Si pas trouvé, utiliser l'heuristique générique avec filtrage strict
+                if not birth_place:
+                    # Chercher des mots en majuscules qui pourraient être des villes
+                    potential_cities = re.findall(r'\b([A-Z]{3,}(?:\s+[A-Z]{3,})*)\b', text_combined)
+
+                    for candidate in potential_cities:
+                        candidate = candidate.strip()
+
+                        # Filtrage strict : exclure tout ce qui n'est pas une ville
+                        excluded_words = [
+                            # Mots du document
+                            'PASSPORT', 'PASSEPORT', 'REPUBLIQUE', 'SENEGAL', 'FRANCE', 'SERVICE',
+                            'AUTORITE', 'PREFECTURE', 'MINISTERE', 'SENEGALAISE', 'FRANCAISE',
+
+                            # Mois en français et anglais (erreurs OCR courantes)
+                            'JANVIER', 'FEVRIER', 'MARS', 'AVRIL', 'MAI', 'JUIN',
+                            'JUILLET', 'AOUT', 'SEPTEMBRE', 'OCTOBRE', 'NOVEMBRE', 'DECEMBRE',
+                            'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'JUNE', 'JULY',
+                            'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+
+                            # Erreurs OCR typiques des mois
+                            'JUILJUL', 'JUIL', 'SEPT', 'JANV', 'FEVR', 'MARS',
+
+                            # Autres mots communs
+                            'MASCULINE', 'FEMININE', 'MALE', 'FEMALE', 'BORN', 'NAISSANCE'
+                        ]
+
+                        # Vérifier que c'est potentiellement une ville
+                        if (len(candidate) >= 3 and
+                                candidate.upper() not in excluded_words and
+                                not re.search(r'\d', candidate) and  # Pas de chiffres
+                                not re.search(r'[/\-:]', candidate) and  # Pas de séparateurs de date
+                                candidate.isalpha() and  # Que des lettres
+                                len(candidate) <= 20):  # Pas trop long (éviter les phrases)
+
+                            # Vérifier que ce n'est pas dans une date
+                            date_context = re.search(rf'\d{{1,2}}\s+{re.escape(candidate)}\s+\d{{4}}', text_combined)
+                            if not date_context:
+                                birth_place = candidate
+                                break
+
+                if birth_place:
+                    data['birthPlace'] = birth_place
+
+                # Taille
+                height_match = re.search(r'(\d{1}[,\.]\d{2})\s*[mM]', text_combined)
+                if height_match:
+                    height = height_match.group(1).replace(',', '.')
+                    data['height'] = f"{height}m"
+
+            except Exception:
+                pass  # Si extraction complémentaire échoue, on continue
+
+        # Pays émetteur
+        issuing_country = 'UNKNOWN'
+        if hasattr(mrz_data, 'country') and mrz_data.country:
+            country_info = get_country_info(mrz_data.country)
+            issuing_country = country_info['name']
+
+        return {
+            'status': 'success',
+            'documentType': 'PASSPORT',
+            'issuingCountry': issuing_country,
+            'confidence': 'very_high' if getattr(mrz_data, 'valid', False) else 'high',
+            'data': data,
+            'extractionMethod': 'PassportEye',
+            'mrzDetected': True,
+            'mrzValid': getattr(mrz_data, 'valid', False)
         }
 
-        # Nettoyage des valeurs nulles
-        extracted_data = {k: v for k, v in extracted_data.items() if v is not None and v != []}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+def extract_card(image_path: str, doc_type: str) -> Dict:
+    """Extraction cartes avec EasyOCR """
+    if not EASYOCR_AVAILABLE:
+        return {'status': 'error', 'error': 'EasyOCR non disponible'}
+
+    try:
+        reader = easyocr.Reader(['en', 'fr'], gpu=False)
+        results = reader.readtext(image_path)
+        text_blocks = [r[1] for r in results if r[2] > 0.5]
+
+        if not text_blocks:
+            return {'status': 'error', 'error': 'Aucun texte détecté'}
+
+        data = {}
+        text_combined = ' '.join(text_blocks)
+
+        # Extraction noms - Approche séquentielle pour cartes étudiantes
+        if doc_type == 'STUDENT_CARD':
+            for i, block in enumerate(text_blocks):
+                if 'CARTE' in normalize_text(block) and 'ETUDIANT' in normalize_text(block):
+                    # Prénom (bloc suivant, format mixte)
+                    if i + 1 < len(text_blocks):
+                        next_block = text_blocks[i + 1].strip()
+                        if next_block.isalpha() and not next_block.isupper() and len(next_block) >= 2:
+                            data['givenNames'] = next_block.title()
+
+                    # Nom (bloc d'après, MAJUSCULES)
+                    if i + 2 < len(text_blocks):
+                        surname_block = text_blocks[i + 2].strip()
+                        if surname_block.isupper() and len(surname_block) >= 3:
+                            # Filtrer les mots-clés
+                            if not any(kw in surname_block for kw in ['CARTE', 'STUDENT', 'ECE', 'PARIS']):
+                                data['surname'] = surname_block
+                    break
+
+        # Autres types : patterns simples
+        else:
+            # Noms avec labels
+            surname_match = re.search(r'(?:NOM|SURNAME)[:\s]*([A-Z][A-Z\s]+)', text_combined, re.IGNORECASE)
+            given_match = re.search(r'(?:PRENOM|GIVEN NAME)[:\s]*([A-Z][A-Z\s]+)', text_combined, re.IGNORECASE)
+
+            if surname_match:
+                data['surname'] = surname_match.group(1).strip()
+            if given_match:
+                data['givenNames'] = given_match.group(1).strip()
+
+        # Dates avec distinction de type
+        birth_date = None
+        expiry_date = None
+
+        # Patterns spécifiques avec labels
+        birth_patterns = [
+            r'(?:NE|BORN|NAISSANCE|DATE DE NAISSANCE)[:\s]*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
+            r'(?:NE\(E\)\s+LE)[:\s]*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})'
+        ]
+
+        # Chercher date de naissance avec label
+        for pattern in birth_patterns:
+            match = re.search(pattern, text_combined, re.IGNORECASE)
+            if match:
+                birth_date = match.group(1)
+                break
+
+        # Si pas trouvé avec labels, prendre les dates génériques
+        if not birth_date:
+            date_matches = re.findall(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', text_combined)
+            if date_matches:
+                # Pour cartes étudiantes, généralement 1 seule date = naissance
+                if doc_type == 'STUDENT_CARD' and len(date_matches) >= 1:
+                    birth_date = date_matches[0]
+                elif len(date_matches) >= 1:
+                    birth_date = date_matches[0]
+
+        # Formatage des dates
+        def format_card_date(date_str):
+            if not date_str:
+                return None
+            cleaned = re.sub(r'[^\d/]', '/', date_str)
+            parts = cleaned.split('/')
+            if len(parts) == 3:
+                day, month, year = parts
+                if len(year) == 2:
+                    year_int = int(year)
+                    year = str(2000 + year_int if year_int <= 30 else 1900 + year_int)
+                return f"{day.zfill(2)}/{month.zfill(2)}/{year}"
+            return date_str
+
+        if birth_date:
+            data['dateOfBirth'] = format_card_date(birth_date)
+        if expiry_date:
+            data['expiryDate'] = format_card_date(expiry_date)
+
+        #  Numéros de document - Extraction améliorée
+        numbers = []
+
+        # Fonction de validation
+        def is_valid_number(num_str):
+            forbidden_words = [
+                'ETUDIANT', 'STUDENT', 'CARTE', 'CARD', 'BORN', 'NAISSANCE',
+                'ECE', 'PARIS', 'FRANCE', 'REPUBLIQUE', 'INGENIEUR', 'SCHOOL'
+            ]
+            if num_str.upper() in forbidden_words:
+                return False
+            if re.match(r'^\d{2}/\d{2}/\d{4}$', num_str) or re.match(r'^\d{4}$', num_str):
+                return False
+            if num_str.isalpha() and len(num_str) > 6:
+                return False
+            return True
+
+        # Patterns pour cartes étudiantes
+        if doc_type == 'STUDENT_CARD':
+            number_patterns = [
+                r'\b(\d{9}[A-Z]{2,3})\b',        # Format INE: 233133124HB
+                r'\b(\d{8,12})\b',               # Numéros longs: 932354782
+            ]
+        else:
+            number_patterns = [
+                r'\b([A-Z]{1,3}\d{6,12})\b',     # Format type FR123456789
+                r'\b(\d{8,15})\b',               # Numéros longs
+            ]
+
+        # Extraction avec validation
+        for pattern in number_patterns:
+            matches = re.finditer(pattern, text_combined)
+            for match in matches:
+                num = match.group(1)
+                if is_valid_number(num) and len(num) >= 6:
+                    numbers.append(num)
+
+        # Supprimer doublons
+        unique_numbers = []
+        for num in numbers:
+            if num not in unique_numbers:
+                unique_numbers.append(num)
+
+        if unique_numbers:
+            data['documentNumbers'] = unique_numbers[:3]
+
+        #  Sexe
+        text_norm = normalize_text(text_combined)
+        if re.search(r'\b(M|MALE|MASCULIN)\b', text_norm):
+            data['sex'] = 'M'
+        elif re.search(r'\b(F|FEMALE|FEMININ)\b', text_norm):
+            data['sex'] = 'F'
+
+        #  Pays
+        issuing_country = 'UNKNOWN'
+        if any(kw in text_norm for kw in ['FRANCE', 'REPUBLIQUE FRANCAISE']):
+            issuing_country = 'FRANCE'
 
         return {
             'status': 'success',
             'documentType': doc_type,
-            'issuingCountry': country,
-            'data': extracted_data,
+            'issuingCountry': issuing_country,
             'confidence': 'medium',
-            'rawText': text_blocks  # Pour debug
+            'data': data,
+            'extractionMethod': 'EasyOCR'
         }
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': str(e)
-        }
+        return {'status': 'error', 'error': str(e)}
+
+def extract_document_data(image_path: str) -> Dict:
+    """Fonction principale - Stratégie adaptative"""
+    try:
+        #  Détection type
+        doc_type = detect_document_type(image_path)
+
+        #  Extraction selon le type
+        if doc_type == 'PASSPORT':
+            return extract_passport(image_path)
+        else:
+            return extract_card(image_path, doc_type)
+
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

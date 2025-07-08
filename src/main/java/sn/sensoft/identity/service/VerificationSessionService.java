@@ -219,7 +219,7 @@ public class VerificationSessionService {
     @Transactional
     public void markSessionAsCompleted(String sessionId) {
         updateSessionStatus(sessionId, VerificationSession.SessionStatus.COMPLETED);
-        System.out.println("✅ Session " + sessionId + " marquée comme COMPLETED");
+        System.out.println(" Session " + sessionId + " marquée comme COMPLETED");
     }
 
     // ===================================

@@ -32,7 +32,7 @@ public class IdentityVerificationController {
     private FileValidator fileValidator;
 
     /**
-     * Upload et extraction (adaptation légère)
+     * Upload et extraction
      */
     @Post(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA)
     public HttpResponse<DocumentUploadResponse> uploadDocument(
@@ -48,7 +48,7 @@ public class IdentityVerificationController {
                 );
             }
 
-            // Utiliser la nouvelle méthode
+            // Utilise la méthode
             IdentityVerificationService.DocumentProcessingResult result =
                     verificationService.processDocumentOnly(userIdentifier, identityDocument);
 
@@ -95,7 +95,7 @@ public class IdentityVerificationController {
                 );
             }
 
-            // Utiliser la nouvelle méthode
+            // Utilise la  méthode
             VerificationResultDto result = verificationService.processPhotoComparison(documentId, userPhoto);
 
             if ("FAILED".equals(result.getStatus())) {
@@ -178,6 +178,11 @@ public class IdentityVerificationController {
     @Get("/history/{userIdentifier}")
     public HttpResponse<java.util.List<VerificationResultDto>> getUserHistory(@PathVariable String userIdentifier) {
         try {
+            // Vérifier si l'utilisateur a déjà fait des vérifications
+            if (!resultService.userHasVerificationHistory(userIdentifier)) {
+                return HttpResponse.notFound();
+            }
+
             var results = resultService.getUserVerificationHistory(userIdentifier);
             var dtos = results.stream()
                     .map(resultService::convertToDto)
@@ -225,7 +230,7 @@ public class IdentityVerificationController {
     }
 
     /**
-     *  Endpoint de diagnostic OpenKM
+     *  Endpoint de diagnos pour OpenKM
      */
     @Get("/status/storage")
     public HttpResponse<java.util.Map<String, Object>> getStorageStatus() {

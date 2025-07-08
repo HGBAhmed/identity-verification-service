@@ -1,5 +1,19 @@
-﻿deepface==0.0.75
+﻿# ===== VERSIONS EXISTANTES (ne pas modifier) =====
+deepface==0.0.75
 tensorflow==2.13.0
 opencv-python==4.8.0.74
 Pillow==9.5.0
 easyocr==1.7.0
+
+# ===== NOUVELLES DÉPENDANCES POUR MRZ =====
+# PassportEye - Solution professionnelle pour MRZ de passeports
+passporteye==2.2.1
+
+# Traitement numérique (compatible avec tensorflow 2.13.0)
+numpy>=1.21.0,<1.25.0
+
+# Utilitaires pour dates
+python-dateutil>=2.8.0
+
+# OpenCV pour traitement d'images
+# opencv-python==4.8.0.74

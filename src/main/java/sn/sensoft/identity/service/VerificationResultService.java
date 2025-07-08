@@ -137,6 +137,12 @@ public class VerificationResultService {
     }
 
     /**
+     * Vérifie si un utilisateur a déjà fait des vérifications
+     */
+    public boolean userHasVerificationHistory(String userIdentifier) {
+        return resultRepository.existsByUserIdentifier(userIdentifier);
+    }
+    /**
      * Récupère l'historique sur une période
      */
     public List<VerificationResult> getUserVerificationHistory(String userIdentifier,
@@ -270,7 +276,7 @@ public class VerificationResultService {
             System.out.println(" Setting updatedAt...");
             dto.setUpdatedAt(result.getUpdatedAt());
 
-            // Test des UUID - POTENTIEL PROBLÈME ICI
+            // Test des UUID
             System.out.println(" Checking documentFileId...");
             UUID docFileId = result.getDocumentFileId();
             System.out.println(" DocumentFileId: " + docFileId);

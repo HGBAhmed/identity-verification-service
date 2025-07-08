@@ -67,7 +67,7 @@ public class IdentityVerificationService {
                 return errorResult;
             }
 
-            // CRÉER UNE SESSION TEMPORAIRE EN BASE DE DONNÉES
+            // CRÉE UNE SESSION TEMPORAIRE EN BASE DE DONNÉES
             sessionId = sessionService.createTemporarySession(userIdentifier);
             System.out.println(" Session temporaire créée en base: " + sessionId);
 

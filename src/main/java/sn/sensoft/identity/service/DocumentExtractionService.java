@@ -26,7 +26,7 @@ public class DocumentExtractionService {
         );
 
         Process process = processBuilder.start();
-        boolean finished = process.waitFor(120, TimeUnit.SECONDS); // 2 MIN DE TIMEOUT
+        boolean finished = process.waitFor(300, TimeUnit.SECONDS); // 2 MIN DE TIMEOUT
 
         if (!finished) {
             process.destroyForcibly();
@@ -68,7 +68,7 @@ public class DocumentExtractionService {
                 result.setIssuingCountry((String) jsonNode.get("issuingCountry"));
                 result.setConfidence((String) jsonNode.get("confidence"));
 
-                // Extraire les données du document
+                // Extraction des données du document
                 @SuppressWarnings("unchecked")
                 Map<String, Object> data = (Map<String, Object>) jsonNode.get("data");
                 if (data != null) {
