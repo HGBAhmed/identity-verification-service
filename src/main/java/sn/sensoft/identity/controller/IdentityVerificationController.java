@@ -13,6 +13,8 @@ import io.micronaut.http.annotation.*;
 import io.micronaut.http.multipart.CompletedFileUpload;
 import io.micronaut.scheduling.TaskExecutors;
 import io.micronaut.scheduling.annotation.ExecuteOn;
+import io.micronaut.security.annotation.Secured;
+import io.micronaut.security.rules.SecurityRule;
 import jakarta.inject.Inject;
 
 @Controller("/api/v1/verification")
@@ -35,6 +37,7 @@ public class IdentityVerificationController {
      * Upload et extraction
      */
     @Post(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
     public HttpResponse<DocumentUploadResponse> uploadDocument(
             @Part("identityDocument") CompletedFileUpload identityDocument,
             @Part("userIdentifier") String userIdentifier) {
@@ -82,6 +85,7 @@ public class IdentityVerificationController {
      * Upload photo et comparaison
      */
     @Post(value = "/compare/{documentId}", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
     public HttpResponse<VerificationResultDto> compareWithPhoto(
             @PathVariable String documentId,
             @Part("userPhoto") CompletedFileUpload userPhoto) {
@@ -113,7 +117,11 @@ public class IdentityVerificationController {
         }
     }
 
+    /**
+     * Upload complet
+     */
     @Post(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
     public HttpResponse<VerificationResultDto> uploadAndVerify(
             @Part("identityDocument") CompletedFileUpload identityDocument,
             @Part("userPhoto") CompletedFileUpload userPhoto,
@@ -137,9 +145,10 @@ public class IdentityVerificationController {
     }
 
     /**
-     *  Récupérer un résultat par son ID
+     * Récupérer un résultat par son ID
      */
     @Get("/result/{requestId}")
+    @Secured({"ADMIN", "VERIFICATION_USER", "VIEWER"})
     public HttpResponse<VerificationResultDto> getResult(@PathVariable String requestId) {
         try {
 
@@ -176,6 +185,7 @@ public class IdentityVerificationController {
      * Historique des vérifications d'un utilisateur
      */
     @Get("/history/{userIdentifier}")
+    @Secured({"ADMIN", "VERIFICATION_USER", "VIEWER"})
     public HttpResponse<java.util.List<VerificationResultDto>> getUserHistory(@PathVariable String userIdentifier) {
         try {
             // Vérifier si l'utilisateur a déjà fait des vérifications
@@ -199,6 +209,7 @@ public class IdentityVerificationController {
      * Statistiques de vérification
      */
     @Get("/stats/today")
+    @Secured("ADMIN")
     public HttpResponse<VerificationResultService.VerificationStats> getTodayStats() {
         try {
             var stats = resultService.getTodayStats();
@@ -208,7 +219,11 @@ public class IdentityVerificationController {
         }
     }
 
+    /**
+     * Statistiques de vérification
+     */
     @Get("/stats/week")
+    @Secured("ADMIN")
     public HttpResponse<VerificationResultService.VerificationStats> getWeekStats() {
         try {
             var stats = resultService.getWeekStats();
@@ -218,21 +233,30 @@ public class IdentityVerificationController {
         }
     }
 
+    /**
+     * Health check
+     */
     @Get("/health")
+    @Secured(SecurityRule.IS_ANONYMOUS)
     public HttpResponse<String> health() {
         return HttpResponse.ok("Identity Verification Service is running");
     }
 
+    /**
+     * Nombre de sessions
+     */
     @Get("/sessions/count")
+    @Secured("ADMIN")
     public HttpResponse<String> getSessionsCount() {
         int count = sessionService.getActiveSessionsCount();
         return HttpResponse.ok("Sessions actives: " + count);
     }
 
     /**
-     *  Endpoint de diagnos pour OpenKM
+     * Endpoint de diagnostic pour OpenKM
      */
     @Get("/status/storage")
+    @Secured("ADMIN")
     public HttpResponse<java.util.Map<String, Object>> getStorageStatus() {
         try {
             var status = new java.util.HashMap<String, Object>();

@@ -19,6 +19,9 @@ dependencies {
     annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
     annotationProcessor("io.micronaut.validation:micronaut-validation-processor")
 
+    // NOUVEAU : Annotation processors pour Security
+    annotationProcessor("io.micronaut.security:micronaut-security-annotations")
+
     // Micronaut Core
     implementation("io.micronaut:micronaut-http-client")
     implementation("io.micronaut:micronaut-http-server-netty")
@@ -41,6 +44,17 @@ dependencies {
     implementation("io.micronaut.validation:micronaut-validation")
     implementation("jakarta.validation:jakarta.validation-api")
 
+    // NOUVEAU : Security & Keycloak
+    implementation("io.micronaut.security:micronaut-security")
+    implementation("io.micronaut.security:micronaut-security-oauth2")
+    implementation("io.micronaut.security:micronaut-security-jwt")
+
+    // NOUVEAU : Support Keycloak
+    implementation("io.micronaut.security:micronaut-security-annotations")
+
+    // NOUVEAU : Client HTTP pour communications avec Keycloak
+    implementation("io.micronaut:micronaut-http-client")
+
     // Runtime
     runtimeOnly("ch.qos.logback:logback-classic")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
@@ -53,6 +67,9 @@ dependencies {
     // Test
     testImplementation("io.micronaut:micronaut-http-client")
     testImplementation("io.micronaut.test:micronaut-test-junit5")
+
+    // NOUVEAU : Tests Security
+    testImplementation("io.micronaut.security:micronaut-security-jwt")
 }
 
 application {
