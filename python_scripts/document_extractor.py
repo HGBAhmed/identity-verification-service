@@ -24,7 +24,7 @@ def normalize_text(text):
     return text.upper().strip()
 
 def detect_document_type(image_path: str) -> str:
-    """Détection rapide du type de document"""
+    """Détection du type de document - seulement PASSPORT ou ID_CARD"""
     if not EASYOCR_AVAILABLE:
         return 'PASSPORT'  # Par défaut
 
@@ -36,12 +36,10 @@ def detect_document_type(image_path: str) -> str:
 
         if any(kw in text_norm for kw in ['PASSPORT', 'PASSEPORT', 'REPUBLIQUE DU']):
             return 'PASSPORT'
-        elif any(kw in text_norm for kw in ['CARTE ETUDIANT', 'STUDENT CARD']):
-            return 'STUDENT_CARD'
         elif any(kw in text_norm for kw in ['CARTE IDENTITE', 'IDENTITY CARD', 'CARTE NATIONALE']):
             return 'ID_CARD'
         else:
-            return 'UNKNOWN'
+            return 'PASSPORT'  # Par défaut si incertain
     except:
         return 'PASSPORT'
 
@@ -380,44 +378,6 @@ def extract_french_id_smart(text: str) -> Dict:
 
     return data
 
-def extract_student_card_sequential(text_blocks: list) -> Dict:
-    """Extraction séquentielle pour cartes étudiantes"""
-    data = {}
-    text_combined = ' '.join(text_blocks)
-
-    for i, block in enumerate(text_blocks):
-        if 'CARTE' in normalize_text(block) and 'ETUDIANT' in normalize_text(block):
-            # Prénom (bloc suivant)
-            if i + 1 < len(text_blocks):
-                next_block = text_blocks[i + 1].strip()
-                if next_block.isalpha() and not next_block.isupper() and len(next_block) >= 2:
-                    data['givenNames'] = next_block.title()
-
-            # Nom (bloc d'après)
-            if i + 2 < len(text_blocks):
-                surname_block = text_blocks[i + 2].strip()
-                if surname_block.isupper() and len(surname_block) >= 3:
-                    if not any(kw in surname_block for kw in ['CARTE', 'STUDENT']):
-                        data['surname'] = surname_block
-            break
-
-    return data
-
-def extract_generic_patterns(text: str) -> Dict:
-    """Patterns génériques pour autres types de documents"""
-    data = {}
-
-    # Patterns simples
-    surname_match = re.search(r'(?:NOM|SURNAME)[:\s]*([A-Z][A-Z\s]+)', text, re.IGNORECASE)
-    given_match = re.search(r'(?:PRENOM|GIVEN NAME)[:\s]*([A-Z][A-Z\s]+)', text, re.IGNORECASE)
-
-    if surname_match:
-        data['surname'] = surname_match.group(1).strip()
-    if given_match:
-        data['givenNames'] = given_match.group(1).strip()
-
-    return data
-
 # FONCTION POUR PASSEPORTS
 
 def extract_passport(image_path: str) -> Dict:
@@ -723,14 +683,8 @@ def extract_card(image_path: str, doc_type: str) -> Dict:
 
         text_combined = ' '.join(text_blocks)
 
-        data = {}
-
-        if doc_type == 'ID_CARD':
-            data = extract_french_id_smart(text_combined)
-        elif doc_type == 'STUDENT_CARD':
-            data = extract_student_card_sequential(text_blocks)
-        else:
-            data = extract_generic_patterns(text_combined)
+        # Extraction spécialisée pour cartes ID françaises
+        data = extract_french_id_smart(text_combined)
 
         # Compléter avec patterns génériques si nécessaire
         if not data.get('sex'):
@@ -759,13 +713,13 @@ def extract_card(image_path: str, doc_type: str) -> Dict:
 def extract_document_data(image_path: str) -> Dict:
     """main"""
     try:
-        #  Détection type
+        #  Détection type (seulement PASSPORT ou ID_CARD)
         doc_type = detect_document_type(image_path)
 
         #  Extraction selon le type
         if doc_type == 'PASSPORT':
             return extract_passport(image_path)  # MRZ + EasyOCR
-        else:
+        else:  # ID_CARD
             return extract_card(image_path, doc_type)  # pour cartes
 
     except Exception as e:
