@@ -6,6 +6,8 @@ import sn.sensoft.identity.entity.VerificationSession;
 import sn.sensoft.identity.repository.VerificationResultRepository;
 import jakarta.inject.Singleton;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -17,6 +19,8 @@ import java.util.UUID;
 @Singleton
 public class VerificationResultService {
 
+    private static final Logger log = LoggerFactory.getLogger(VerificationResultService.class);
+
     private final VerificationResultRepository resultRepository;
     private final VerificationSessionService sessionService;
 
@@ -24,11 +28,10 @@ public class VerificationResultService {
                                      VerificationSessionService sessionService) {
         this.resultRepository = resultRepository;
         this.sessionService = sessionService;
+        log.info("VerificationResultService initialisé");
     }
 
-    // ===================================
     // SAUVEGARDE DES RÉSULTATS
-    // ===================================
 
     /**
      * Sauvegarde un résultat de vérification complet
@@ -39,6 +42,9 @@ public class VerificationResultService {
                                                      UUID documentFileId,
                                                      UUID photoFileId) {
         try {
+            log.debug("Sauvegarde résultat de vérification - RequestId: {}, Session: {}",
+                    resultDto.getRequestId(), sessionId);
+
             VerificationResult result = new VerificationResult(
                     resultDto.getRequestId(),
                     resultDto.getUserIdentifier()
@@ -61,6 +67,10 @@ public class VerificationResultService {
                 faceData.put("message", resultDto.getFaceComparison().getMessage());
                 faceData.put("timestamp", LocalDateTime.now());
                 result.setFaceComparisonData(faceData);
+
+                log.debug("Données faciales sauvegardées - Match: {}, Confiance: {:.3f}",
+                        resultDto.getFaceComparison().getIsMatch(),
+                        resultDto.getFaceComparison().getConfidenceScore());
             }
 
             // Données d'extraction de document
@@ -71,6 +81,10 @@ public class VerificationResultService {
                 docData.put("extractedFields", resultDto.getDocumentData().getExtractedFields());
                 docData.put("timestamp", LocalDateTime.now());
                 result.setDocumentExtractionData(docData);
+
+                log.debug("Données document sauvegardées - Type: {}, Pays: {}",
+                        resultDto.getDocumentData().getDocumentType(),
+                        resultDto.getDocumentData().getIssuingCountry());
             }
 
             // Références aux fichiers
@@ -84,14 +98,14 @@ public class VerificationResultService {
             // Sauvegarder
             result = resultRepository.save(result);
 
-            System.out.println(" Résultat sauvegardé: " + result.getRequestId() +
-                    " (Match: " + result.getFaceIsMatch() +
-                    ", Confiance: " + result.getConfidenceAsDouble() + ")");
+            log.info("Résultat sauvegardé avec succès - RequestId: {}, Match: {}, Confiance: {:.3f}",
+                    result.getRequestId(), result.getFaceIsMatch(), result.getConfidenceAsDouble());
 
             return result;
 
         } catch (Exception e) {
-            System.err.println(" Erreur sauvegarde résultat: " + e.getMessage());
+            log.error("Erreur sauvegarde résultat pour RequestId {}: {}",
+                    resultDto.getRequestId(), e.getMessage(), e);
             throw new RuntimeException("Erreur sauvegarde résultat", e);
         }
     }
@@ -103,51 +117,67 @@ public class VerificationResultService {
     public VerificationResult saveErrorResult(String requestId, String userIdentifier,
                                               String errorMessage, String sessionId) {
         try {
+            log.debug("Sauvegarde résultat d'erreur - RequestId: {}, Session: {}", requestId, sessionId);
+
             VerificationResult result = VerificationResult.createError(requestId, userIdentifier, errorMessage);
             result.setSessionId(sessionId);
 
             result = resultRepository.save(result);
 
-            System.out.println(" Résultat d'erreur sauvegardé: " + requestId + " - " + errorMessage);
+            log.warn("Résultat d'erreur sauvegardé - RequestId: {}, Erreur: {}", requestId, errorMessage);
 
             return result;
 
         } catch (Exception e) {
-            System.err.println(" Erreur sauvegarde résultat d'erreur: " + e.getMessage());
+            log.error("Erreur sauvegarde résultat d'erreur pour RequestId {}: {}", requestId, e.getMessage(), e);
             throw new RuntimeException("Erreur sauvegarde résultat d'erreur", e);
         }
     }
 
-    // ===================================
     // RECHERCHE ET CONSULTATION
-    // ===================================
 
     /**
      * Récupère un résultat par son request ID
      */
     public VerificationResult getResult(String requestId) {
-        return resultRepository.findByRequestId(requestId).orElse(null);
+        log.debug("Recherche résultat pour RequestId: {}", requestId);
+        VerificationResult result = resultRepository.findByRequestId(requestId).orElse(null);
+
+        if (result != null) {
+            log.debug("Résultat trouvé pour RequestId: {}", requestId);
+        } else {
+            log.debug("Aucun résultat trouvé pour RequestId: {}", requestId);
+        }
+
+        return result;
     }
 
     /**
      * Récupère l'historique des vérifications d'un utilisateur
      */
     public List<VerificationResult> getUserVerificationHistory(String userIdentifier) {
-        return resultRepository.findByUserIdentifierOrderByCreatedAtDesc(userIdentifier);
+        log.debug("Recherche historique pour utilisateur: {}", userIdentifier);
+        List<VerificationResult> results = resultRepository.findByUserIdentifierOrderByCreatedAtDesc(userIdentifier);
+        log.debug("Historique trouvé: {} résultats pour utilisateur: {}", results.size(), userIdentifier);
+        return results;
     }
 
     /**
      * Vérifie si un utilisateur a déjà fait des vérifications
      */
     public boolean userHasVerificationHistory(String userIdentifier) {
-        return resultRepository.existsByUserIdentifier(userIdentifier);
+        boolean hasHistory = resultRepository.existsByUserIdentifier(userIdentifier);
+        log.debug("Utilisateur {} a un historique: {}", userIdentifier, hasHistory);
+        return hasHistory;
     }
+
     /**
      * Récupère l'historique sur une période
      */
     public List<VerificationResult> getUserVerificationHistory(String userIdentifier,
                                                                LocalDateTime startDate,
                                                                LocalDateTime endDate) {
+        log.debug("Recherche historique pour utilisateur: {} entre {} et {}", userIdentifier, startDate, endDate);
         return resultRepository.findByUserIdentifierAndCreatedAtBetween(userIdentifier, startDate, endDate);
     }
 
@@ -155,6 +185,7 @@ public class VerificationResultService {
      * Récupère les résultats récents
      */
     public List<VerificationResult> getRecentResults() {
+        log.debug("Récupération des résultats récents");
         return resultRepository.findTop10ByOrderByCreatedAtDesc();
     }
 
@@ -162,17 +193,18 @@ public class VerificationResultService {
      * Récupère les résultats par statut
      */
     public List<VerificationResult> getResultsByStatus(VerificationResult.VerificationStatus status) {
+        log.debug("Recherche résultats par statut: {}", status);
         return resultRepository.findByStatusOrderByCreatedAtDesc(status);
     }
 
-    // ===================================
     // STATISTIQUES
-    // ===================================
 
     /**
      * Statistiques de succès sur une période
      */
     public VerificationStats getStatsBetween(LocalDateTime startDate, LocalDateTime endDate) {
+        log.debug("Calcul statistiques entre {} et {}", startDate, endDate);
+
         long totalVerifications = resultRepository.countTotalVerificationsBetween(startDate, endDate);
         long successfulVerifications = resultRepository.countSuccessfulVerificationsBetween(startDate, endDate);
         Double avgConfidence = resultRepository.averageConfidenceScoreBetween(startDate, endDate).orElse(0.0);
@@ -180,7 +212,7 @@ public class VerificationResultService {
         double successRate = totalVerifications > 0 ?
                 (double) successfulVerifications / totalVerifications * 100 : 0.0;
 
-        return new VerificationStats(
+        VerificationStats stats = new VerificationStats(
                 totalVerifications,
                 successfulVerifications,
                 successRate,
@@ -188,6 +220,9 @@ public class VerificationResultService {
                 startDate,
                 endDate
         );
+
+        log.debug("Statistiques calculées: {}", stats);
+        return stats;
     }
 
     /**
@@ -207,28 +242,27 @@ public class VerificationResultService {
         return getStatsBetween(weekAgo, LocalDateTime.now());
     }
 
-    // ===================================
     // NETTOYAGE ET MAINTENANCE
-    // ===================================
-
     /**
      * Nettoie les anciens résultats selon la politique de rétention
      */
     @Transactional
     public int cleanupOldResults(int retentionDays) {
+        log.debug("Nettoyage résultats anciens (> {} jours)", retentionDays);
+
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(retentionDays);
         int deletedCount = resultRepository.deleteByCreatedAtBefore(cutoffDate);
 
         if (deletedCount > 0) {
-            System.out.println(" Nettoyage: " + deletedCount + " résultats anciens supprimés (> " + retentionDays + " jours)");
+            log.info("Nettoyage terminé: {} résultats anciens supprimés (> {} jours)", deletedCount, retentionDays);
+        } else {
+            log.debug("Aucun résultat ancien à supprimer");
         }
 
         return deletedCount;
     }
 
-    // ===================================
     // MÉTHODES UTILITAIRES
-    // ===================================
 
     private VerificationResult.VerificationStatus convertStatus(String status) {
         if (status == null) return VerificationResult.VerificationStatus.COMPLETED;
@@ -247,56 +281,39 @@ public class VerificationResultService {
     /**
      * Convertit un résultat persisté vers un DTO pour la réponse
      */
-    /**
-     * Version debug de convertToDto pour identifier le problème
-     */
     public VerificationResultDto convertToDto(VerificationResult result) {
-        if (result == null) return null;
+        if (result == null) {
+            log.warn("Tentative de conversion d'un résultat null");
+            return null;
+        }
 
         try {
-            System.out.println(" Début conversion DTO");
+            log.debug("Conversion DTO pour RequestId: {}", result.getRequestId());
 
             VerificationResultDto dto = new VerificationResultDto();
 
-            System.out.println(" Setting requestId: " + result.getRequestId());
             dto.setRequestId(result.getRequestId());
-
-            System.out.println(" Setting userIdentifier: " + result.getUserIdentifier());
             dto.setUserIdentifier(result.getUserIdentifier());
-
-            System.out.println(" Setting status: " + result.getStatus());
             dto.setStatus(result.getStatus().name());
-
-            System.out.println(" Setting message: " + result.getMessage());
             dto.setMessage(result.getMessage());
-
-            System.out.println(" Setting createdAt...");
             dto.setCreatedAt(result.getCreatedAt());
-
-            System.out.println(" Setting updatedAt...");
             dto.setUpdatedAt(result.getUpdatedAt());
 
-            // Test des UUID
-            System.out.println(" Checking documentFileId...");
-            UUID docFileId = result.getDocumentFileId();
-            System.out.println(" DocumentFileId: " + docFileId);
-
-            System.out.println("Checking photoFileId...");
-            UUID photoFileId = result.getPhotoFileId();
-            System.out.println(" PhotoFileId: " + photoFileId);
+            log.debug("Propriétés de base définies pour RequestId: {}", result.getRequestId());
 
             // Données de comparaison faciale
-            System.out.println(" Processing face data...");
             if (result.getFaceConfidenceScore() != null) {
                 VerificationResultDto.FaceComparisonData faceData = new VerificationResultDto.FaceComparisonData();
                 faceData.setConfidenceScore(result.getConfidenceAsDouble());
                 faceData.setIsMatch(result.getFaceIsMatch());
                 faceData.setMessage(result.getMessage());
                 dto.setFaceComparison(faceData);
+
+                log.debug("Données faciales ajoutées - Match: {}, Confiance: {:.3f}",
+                        result.getFaceIsMatch(), result.getConfidenceAsDouble());
             }
 
             // Données d'extraction de document
-            System.out.println(" Processing document data...");
             if (result.getDocumentExtractionData() != null) {
                 VerificationResultDto.DocumentExtractionData docData = new VerificationResultDto.DocumentExtractionData();
 
@@ -312,21 +329,22 @@ public class VerificationResultService {
                 }
 
                 dto.setDocumentData(docData);
+
+                log.debug("Données document ajoutées - Type: {}, Pays: {}",
+                        docData.getDocumentType(), docData.getIssuingCountry());
             }
 
-            System.out.println(" Conversion DTO terminée avec succès");
+            log.debug("Conversion DTO terminée avec succès pour RequestId: {}", result.getRequestId());
             return dto;
 
         } catch (Exception e) {
-            System.err.println(" Erreur dans convertToDto: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            e.printStackTrace();
+            log.error("Erreur conversion DTO pour RequestId {}: {}",
+                    result.getRequestId(), e.getMessage(), e);
             throw e;
         }
     }
 
-    // ===================================
     // CLASSE STATISTIQUES
-    // ===================================
     @io.micronaut.serde.annotation.Serdeable
     public static class VerificationStats {
         private final long totalVerifications;

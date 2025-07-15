@@ -4,6 +4,8 @@ import sn.sensoft.identity.entity.VerificationSession;
 import sn.sensoft.identity.repository.VerificationSessionRepository;
 import jakarta.inject.Singleton;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -14,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 @Singleton
 public class VerificationSessionService {
+
+    private static final Logger log = LoggerFactory.getLogger(VerificationSessionService.class);
 
     private final VerificationSessionRepository sessionRepository;
     private final ScheduledExecutorService cleanupExecutor;
@@ -26,14 +30,14 @@ public class VerificationSessionService {
         this.sessionRepository = sessionRepository;
         this.cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
+        log.info("VerificationSessionService initialisé avec nettoyage automatique toutes les 10 minutes");
+
         // Nettoyage automatique toutes les 10 minutes
         this.cleanupExecutor.scheduleAtFixedRate(this::cleanupExpiredSessions,
                 10, 10, TimeUnit.MINUTES);
     }
 
-    // ===================================
-    // GÉNÉRATION D'IDS COURTS
-    // ===================================
+    // GÉNÉRATION D'ID
 
     /**
      * Génère un ID court alphanumérique de 8 caractères
@@ -47,7 +51,7 @@ public class VerificationSessionService {
     }
 
     /**
-     * Génère un ID unique (vérifie les collisions en base)
+     * Génère un ID unique,chek s'il y a similarité en base
      */
     public String generateUniqueSessionId() {
         String id;
@@ -56,25 +60,27 @@ public class VerificationSessionService {
             id = generateShortId();
             attempts++;
 
-            // Sécurité : max 10 tentatives (collision très improbable)
+            // Sécurité : max 10 tentatives
             if (attempts > 10) {
+                log.error("Impossible de générer un ID unique après 10 tentatives");
                 throw new RuntimeException("Impossible de générer un ID unique après 10 tentatives");
             }
         } while (sessionRepository.existsBySessionId(id));
 
+        log.debug("ID unique généré: {} (tentatives: {})", id, attempts);
         return id;
     }
 
     /**
-     * Génère un ID court public pour les requestId (pas besoin d'unicité stricte)
+     * Génère un ID court public pour les requestId
      */
     public String generateShortRequestId() {
-        return generateShortId();
+        String id = generateShortId();
+        log.debug("RequestId généré: {}", id);
+        return id;
     }
 
-    // ===================================
     // GESTION DES SESSIONS
-    // ===================================
 
     /**
      * Crée une nouvelle session de document après extraction réussie
@@ -84,6 +90,9 @@ public class VerificationSessionService {
                                         String issuingCountry, Map<String, Object> extractedData) {
         String sessionId = generateUniqueSessionId();
 
+        log.debug("Création session document - SessionId: {}, Utilisateur: {}, Type: {}",
+                sessionId, userIdentifier, documentType);
+
         VerificationSession session = new VerificationSession(sessionId, userIdentifier);
         session.setDocumentType(documentType);
         session.setIssuingCountry(issuingCountry);
@@ -92,7 +101,8 @@ public class VerificationSessionService {
 
         session = sessionRepository.save(session);
 
-        System.out.println(" Session créée: " + sessionId + " pour utilisateur: " + userIdentifier);
+        log.info("Session document créée avec succès - SessionId: {}, Utilisateur: {}, Type: {}",
+                sessionId, userIdentifier, documentType);
         return sessionId;
     }
 
@@ -101,29 +111,32 @@ public class VerificationSessionService {
      */
     public VerificationSession getSession(String sessionId) {
         if (sessionId == null || sessionId.trim().isEmpty()) {
+            log.warn("Tentative de récupération session avec ID null ou vide");
             return null;
         }
+
+        log.debug("Récupération session: {}", sessionId);
 
         VerificationSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
 
         if (session == null) {
-            System.out.println(" Session non trouvée: " + sessionId);
+            log.debug("Session non trouvée: {}", sessionId);
             return null;
         }
 
         if (session.isExpired()) {
-            System.out.println(" Session expirée: " + sessionId);
+            log.warn("Session expirée: {} (expirée à: {})", sessionId, session.getExpiresAt());
             sessionRepository.deleteById(session.getId());
             return null;
         }
 
         if (!session.isValid()) {
-            System.out.println(" Session invalide: " + sessionId);
+            log.warn("Session invalide: {} (statut: {})", sessionId, session.getStatus());
             sessionRepository.deleteById(session.getId());
             return null;
         }
 
-        System.out.println(" Session récupérée: " + sessionId);
+        log.debug("Session récupérée avec succès: {} (expire à: {})", sessionId, session.getExpiresAt());
         return session;
     }
 
@@ -132,11 +145,15 @@ public class VerificationSessionService {
      */
     @Transactional
     public void updateSessionStatus(String sessionId, VerificationSession.SessionStatus status) {
+        log.debug("Mise à jour statut session: {} -> {}", sessionId, status);
+
         VerificationSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
         if (session != null) {
             session.setStatus(status);
             sessionRepository.update(session);
-            System.out.println(" Session " + sessionId + " mise à jour: " + status);
+            log.info("Session {} mise à jour avec statut: {}", sessionId, status);
+        } else {
+            log.warn("Session non trouvée pour mise à jour statut: {}", sessionId);
         }
     }
 
@@ -145,11 +162,17 @@ public class VerificationSessionService {
      */
     @Transactional
     public void extendSession(String sessionId, int additionalMinutes) {
+        log.debug("Prolongation session: {} de {} minutes", sessionId, additionalMinutes);
+
         VerificationSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
         if (session != null) {
+            LocalDateTime oldExpiration = session.getExpiresAt();
             session.extendExpiration(additionalMinutes);
             sessionRepository.update(session);
-            System.out.println(" Session " + sessionId + " prolongée de " + additionalMinutes + " minutes");
+            log.info("Session {} prolongée de {} minutes (nouvelle expiration: {})",
+                    sessionId, additionalMinutes, session.getExpiresAt());
+        } else {
+            log.warn("Session non trouvée pour prolongation: {}", sessionId);
         }
     }
 
@@ -159,10 +182,14 @@ public class VerificationSessionService {
     @Transactional
     public void removeSession(String sessionId) {
         if (sessionId != null) {
+            log.debug("Suppression session: {}", sessionId);
+
             VerificationSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
             if (session != null) {
                 sessionRepository.deleteById(session.getId());
-                System.out.println(" Session supprimée: " + sessionId);
+                log.info("Session supprimée avec succès: {}", sessionId);
+            } else {
+                log.debug("Session déjà supprimée ou inexistante: {}", sessionId);
             }
         }
     }
@@ -172,9 +199,9 @@ public class VerificationSessionService {
      */
     @Transactional
     public void removeSessionById(java.util.UUID sessionUuid) {
+        log.debug("Suppression session par UUID: {}", sessionUuid);
         sessionRepository.deleteById(sessionUuid);
     }
-
 
     /**
      * Crée une session temporaire VIDE (avant extraction)
@@ -183,13 +210,15 @@ public class VerificationSessionService {
     public String createTemporarySession(String userIdentifier) {
         String sessionId = generateUniqueSessionId();
 
+        log.debug("Création session temporaire - SessionId: {}, Utilisateur: {}", sessionId, userIdentifier);
+
         VerificationSession session = new VerificationSession(sessionId, userIdentifier);
         session.setStatus(VerificationSession.SessionStatus.PENDING);
         // Les autres champs (documentType, issuingCountry, extractedData) seront mis à jour plus tard
 
         session = sessionRepository.save(session);
 
-        System.out.println("Session temporaire créée: " + sessionId + " pour utilisateur: " + userIdentifier);
+        log.info("Session temporaire créée avec succès - SessionId: {}, Utilisateur: {}", sessionId, userIdentifier);
         return sessionId;
     }
 
@@ -199,6 +228,8 @@ public class VerificationSessionService {
     @Transactional
     public void updateSessionWithExtractionData(String sessionId, String documentType,
                                                 String issuingCountry, Map<String, Object> extractedData) {
+        log.debug("Mise à jour session avec données extraction - SessionId: {}, Type: {}", sessionId, documentType);
+
         VerificationSession session = sessionRepository.findBySessionId(sessionId).orElse(null);
         if (session != null) {
             session.setDocumentType(documentType);
@@ -207,9 +238,10 @@ public class VerificationSessionService {
             session.setStatus(VerificationSession.SessionStatus.PROCESSING);
 
             sessionRepository.update(session);
-            System.out.println("Session " + sessionId + " mise à jour avec données d'extraction");
+            log.info("Session {} mise à jour avec données extraction - Type: {}, Pays: {}",
+                    sessionId, documentType, issuingCountry);
         } else {
-            System.out.println("Session non trouvée pour mise à jour: " + sessionId);
+            log.warn("Session non trouvée pour mise à jour extraction: {}", sessionId);
         }
     }
 
@@ -218,46 +250,50 @@ public class VerificationSessionService {
      */
     @Transactional
     public void markSessionAsCompleted(String sessionId) {
+        log.debug("Marquage session comme terminée: {}", sessionId);
         updateSessionStatus(sessionId, VerificationSession.SessionStatus.COMPLETED);
-        System.out.println(" Session " + sessionId + " marquée comme COMPLETED");
     }
 
-    // ===================================
     // NETTOYAGE AUTOMATIQUE
-    // ===================================
 
     /**
      * Nettoyage automatique des sessions expirées
      */
     @Transactional
     public void cleanupExpiredSessions() {
+        log.debug("Démarrage nettoyage sessions expirées");
+
         LocalDateTime now = LocalDateTime.now();
         int removedCount = sessionRepository.deleteByExpiresAtBefore(now);
 
         if (removedCount > 0) {
-            System.out.println(" Nettoyage: " + removedCount + " sessions expirées supprimées");
+            log.info("Nettoyage terminé: {} sessions expirées supprimées", removedCount);
+        } else {
+            log.debug("Aucune session expirée à supprimer");
         }
     }
 
-    // ===================================
     // REQUÊTES ET STATISTIQUES
-    // ===================================
 
     /**
      * Statistiques pour debug
      */
     public int getActiveSessionsCount() {
         cleanupExpiredSessions(); // Nettoyage avant comptage
-        return (int) sessionRepository.findByStatusAndExpiresAtAfter(
+        int count = (int) sessionRepository.findByStatusAndExpiresAtAfter(
                 VerificationSession.SessionStatus.PENDING,
                 LocalDateTime.now()
         ).size();
+
+        log.debug("Nombre de sessions actives: {}", count);
+        return count;
     }
 
     /**
      * Sessions actives d'un utilisateur
      */
     public java.util.List<VerificationSession> getUserActiveSessions(String userIdentifier) {
+        log.debug("Recherche sessions actives pour utilisateur: {}", userIdentifier);
         return sessionRepository.findByUserIdentifierAndExpiresAtAfter(userIdentifier, LocalDateTime.now());
     }
 
@@ -265,6 +301,7 @@ public class VerificationSessionService {
      * Statistiques sur une période
      */
     public long getSessionCountBetween(LocalDateTime startDate, LocalDateTime endDate) {
+        log.debug("Comptage sessions entre {} et {}", startDate, endDate);
         return sessionRepository.countByCreatedAtBetween(startDate, endDate);
     }
 
@@ -272,18 +309,19 @@ public class VerificationSessionService {
      * Sessions par statut
      */
     public java.util.List<VerificationSession> getSessionsByStatus(VerificationSession.SessionStatus status) {
+        log.debug("Recherche sessions par statut: {}", status);
         return sessionRepository.findByStatusAndExpiresAtAfter(status, LocalDateTime.now());
     }
 
-    // ===================================
     // MÉTHODES UTILITAIRES
-    // ===================================
 
     /**
-     * Convertit l'ancienne DocumentSession vers la nouvelle entité
+     * Convertit DocumentSession vers l entité
      */
     public VerificationSession convertFromDocumentSession(sn.sensoft.identity.dto.DocumentSession oldSession) {
         if (oldSession == null) return null;
+
+        log.debug("Conversion DocumentSession vers VerificationSession: {}", oldSession.getDocumentId());
 
         VerificationSession newSession = new VerificationSession(
                 oldSession.getDocumentId(),
@@ -299,10 +337,12 @@ public class VerificationSessionService {
     }
 
     /**
-     * Convertit la nouvelle entité vers l'ancien DTO (pour compatibilité)
+     * Convertit l entité vers le DTO
      */
     public sn.sensoft.identity.dto.DocumentSession convertToDocumentSession(VerificationSession session) {
         if (session == null) return null;
+
+        log.debug("Conversion VerificationSession vers DocumentSession: {}", session.getSessionId());
 
         sn.sensoft.identity.dto.DocumentSession oldSession = new sn.sensoft.identity.dto.DocumentSession(
                 session.getSessionId(),
@@ -318,22 +358,26 @@ public class VerificationSessionService {
         return oldSession;
     }
 
-    // ===================================
     // SHUTDOWN PROPRE
-    // ===================================
 
     /**
      * Shutdown propre du service
      */
     public void shutdown() {
+        log.info("Arrêt du service de sessions");
+
         cleanupExecutor.shutdown();
         try {
             if (!cleanupExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Arrêt forcé du service de nettoyage");
                 cleanupExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {
+            log.error("Interruption lors de l'arrêt du service");
             cleanupExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
+
+        log.info("Service de sessions arrêté");
     }
 }

@@ -181,7 +181,7 @@ public class OpenKMService {
         }
     }
 
-    // ================== DOWNLOAD METHODS ==================
+    // DOWNLOAD METHODS
 
     public TempFileResult downloadToTempFile(String openkmUuid, String openkmPath) throws IOException {
         if (!enabled) {
@@ -279,7 +279,7 @@ public class OpenKMService {
         }
     }
 
-    // ================== UTILITY METHODS ==================
+    // METHODES UTILITAIRES
 
     // Création du fichier temporaire
     private TempFileResult createTempFile(byte[] content, String identifier) throws IOException {
@@ -414,7 +414,7 @@ public class OpenKMService {
         return enabled;
     }
 
-    // ================== RESULT CLASSES ==================
+    // CLASSES DE RESULTATS
 
     public static class OpenKMUploadResult {
         private final boolean success;

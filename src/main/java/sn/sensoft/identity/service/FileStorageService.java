@@ -9,6 +9,8 @@ import sn.sensoft.identity.repository.VerificationFileRepository;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -20,6 +22,8 @@ import java.util.UUID;
 
 @Singleton
 public class FileStorageService {
+
+    private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
 
     private final OpenKMService openKMService;
     private final VerificationFileRepository fileRepository;
@@ -36,6 +40,8 @@ public class FileStorageService {
         this.openKMEnabled = openKMEnabled;
         this.localBasePath = localBasePath;
 
+        log.info("FileStorageService initialisé - OpenKM: {}, Chemin local: {}", openKMEnabled, localBasePath);
+
         if (!openKMEnabled) {
             createLocalDirectories();
         }
@@ -45,6 +51,8 @@ public class FileStorageService {
 
     @Transactional
     public FileStorageResult saveIdentityDocument(CompletedFileUpload file, String sessionId) throws IOException {
+        log.debug("Sauvegarde document d'identité pour session: {}, fichier: {}", sessionId, file.getFilename());
+
         if (openKMEnabled) {
             return saveFileToOpenKM(file, sessionId, FileType.IDENTITY_DOCUMENT);
         } else {
@@ -54,6 +62,8 @@ public class FileStorageService {
 
     @Transactional
     public FileStorageResult saveUserPhoto(CompletedFileUpload file, String sessionId) throws IOException {
+        log.debug("Sauvegarde photo utilisateur pour session: {}, fichier: {}", sessionId, file.getFilename());
+
         if (openKMEnabled) {
             return saveFileToOpenKM(file, sessionId, FileType.USER_PHOTO);
         } else {
@@ -64,6 +74,8 @@ public class FileStorageService {
     // RÉCUPÉRATION DE FICHIERS POUR SCRIPTS PYTHON
 
     public String getFilePathForProcessing(String sessionId, FileType fileType) throws IOException {
+        log.debug("Récupération chemin fichier pour traitement - Session: {}, Type: {}", sessionId, fileType);
+
         VerificationFile verificationFile = fileRepository.findBySessionIdAndFileType(sessionId, fileType)
                 .orElseThrow(() -> new IOException("Fichier non trouvé pour la session: " + sessionId + ", type: " + fileType));
 
@@ -71,26 +83,35 @@ public class FileStorageService {
             return getOpenKMFileForProcessing(verificationFile);
         } else {
             // Mode local - retourner directement le chemin
+            log.debug("Mode local - Retour du chemin: {}", verificationFile.getOpenkmPath());
             return verificationFile.getOpenkmPath(); // En mode local, on stocke le chemin local ici
         }
     }
 
     private String getOpenKMFileForProcessing(VerificationFile verificationFile) throws IOException {
+        log.debug("Récupération fichier OpenKM pour traitement - UUID: {}", verificationFile.getOpenkmUuid());
+
         // Vérifier si un fichier temporaire existe et n'est pas expiré
         if (verificationFile.getTempPath() != null && !verificationFile.isTempFileExpired()) {
             // Vérifier que le fichier existe physiquement
             if (Files.exists(Paths.get(verificationFile.getTempPath()))) {
+                log.debug("Fichier temporaire valide trouvé: {}", verificationFile.getTempPath());
                 return verificationFile.getTempPath();
             }
+            log.debug("Fichier temporaire inexistant, re-téléchargement nécessaire");
         }
 
         // Télécharger depuis OpenKM vers un fichier temporaire
+        log.debug("Téléchargement depuis OpenKM - UUID: {}, Path: {}",
+                verificationFile.getOpenkmUuid(), verificationFile.getOpenkmPath());
+
         OpenKMService.TempFileResult tempResult = openKMService.downloadToTempFile(
                 verificationFile.getOpenkmUuid(),
                 verificationFile.getOpenkmPath()
         );
 
         if (!tempResult.isSuccess()) {
+            log.error("Échec téléchargement depuis OpenKM: {}", tempResult.getError());
             throw new IOException("Erreur téléchargement depuis OpenKM: " + tempResult.getError());
         }
 
@@ -98,6 +119,7 @@ public class FileStorageService {
         verificationFile.setTempFile(tempResult.getTempFilePath(), 30); // 30 minutes
         fileRepository.update(verificationFile);
 
+        log.info("Fichier temporaire créé avec succès: {}", tempResult.getTempFilePath());
         return tempResult.getTempFilePath();
     }
 
@@ -105,6 +127,8 @@ public class FileStorageService {
 
     private FileStorageResult saveFileToOpenKM(CompletedFileUpload file, String sessionId, FileType fileType) throws IOException {
         try {
+            log.debug("Upload vers OpenKM - Session: {}, Type: {}, Fichier: {}", sessionId, fileType, file.getFilename());
+
             // Upload vers OpenKM
             OpenKMService.OpenKMUploadResult uploadResult;
             if (fileType == FileType.IDENTITY_DOCUMENT) {
@@ -114,6 +138,7 @@ public class FileStorageService {
             }
 
             if (!uploadResult.isSuccess()) {
+                log.error("Échec upload OpenKM pour session {}: {}", sessionId, uploadResult.getError());
                 return FileStorageResult.error("Erreur upload OpenKM: " + uploadResult.getError());
             }
 
@@ -132,6 +157,9 @@ public class FileStorageService {
 
             verificationFile = fileRepository.save(verificationFile);
 
+            log.info("Fichier sauvegardé avec succès dans OpenKM - Session: {}, UUID: {}, Taille: {} bytes",
+                    sessionId, uploadResult.getOpenkmUuid(), uploadResult.getFileSize());
+
             return FileStorageResult.success(
                     verificationFile.getId(),
                     uploadResult.getOpenkmUuid(),
@@ -140,6 +168,7 @@ public class FileStorageService {
             );
 
         } catch (Exception e) {
+            log.error("Erreur sauvegarde OpenKM pour session {}: {}", sessionId, e.getMessage(), e);
             throw new IOException("Erreur sauvegarde OpenKM: " + e.getMessage(), e);
         }
     }
@@ -149,6 +178,8 @@ public class FileStorageService {
     private FileStorageResult saveFileLocally(CompletedFileUpload file, String sessionId,
                                               FileType fileType, String subDirectory) throws IOException {
         try {
+            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}", sessionId, fileType, subDirectory);
+
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + file.getFilename();
 
@@ -172,6 +203,9 @@ public class FileStorageService {
 
             verificationFile = fileRepository.save(verificationFile);
 
+            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
+                    sessionId, filePath, file.getSize());
+
             return FileStorageResult.success(
                     verificationFile.getId(),
                     verificationFile.getOpenkmUuid(),
@@ -180,6 +214,7 @@ public class FileStorageService {
             );
 
         } catch (Exception e) {
+            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
             throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
         }
     }
@@ -188,20 +223,25 @@ public class FileStorageService {
 
     public boolean deleteFile(UUID fileId) {
         try {
+            log.debug("Suppression fichier: {}", fileId);
+
             VerificationFile verificationFile = fileRepository.findById(fileId).orElse(null);
             if (verificationFile == null) {
+                log.warn("Fichier non trouvé pour suppression: {}", fileId);
                 return false;
             }
 
             if (openKMEnabled) {
                 // TODO: Implémenter la suppression OpenKM via API REST
                 // Pour le moment, on supprime juste l'enregistrement
+                log.debug("Suppression OpenKM non implémentée, suppression de l'enregistrement seulement");
             } else {
                 // Suppression locale
                 try {
-                    Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
+                    boolean deleted = Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
+                    log.debug("Fichier local supprimé: {} - Succès: {}", verificationFile.getOpenkmPath(), deleted);
                 } catch (IOException e) {
-                    System.err.println("Erreur suppression fichier local: " + e.getMessage());
+                    log.error("Erreur suppression fichier local {}: {}", verificationFile.getOpenkmPath(), e.getMessage());
                 }
             }
 
@@ -212,21 +252,27 @@ public class FileStorageService {
 
             // Supprimer l'enregistrement
             fileRepository.deleteById(fileId);
+            log.info("Fichier supprimé avec succès: {}", fileId);
             return true;
 
         } catch (Exception e) {
-            System.err.println("Erreur suppression fichier: " + e.getMessage());
+            log.error("Erreur suppression fichier {}: {}", fileId, e.getMessage(), e);
             return false;
         }
     }
 
     public void cleanupExpiredTempFiles() {
+        log.debug("Démarrage nettoyage fichiers temporaires expirés");
+
         if (openKMEnabled) {
             // Nettoyer les fichiers temporaires OpenKM
             openKMService.cleanupExpiredTempFiles();
 
             // Nettoyer les enregistrements de fichiers temporaires expirés
-            fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
+            int deletedCount = fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
+            if (deletedCount > 0) {
+                log.info("Nettoyage: {} enregistrements de fichiers temporaires expirés supprimés", deletedCount);
+            }
         }
     }
 
@@ -236,8 +282,9 @@ public class FileStorageService {
         try {
             Files.createDirectories(Paths.get(localBasePath, "identity_documents"));
             Files.createDirectories(Paths.get(localBasePath, "user_photos"));
-            System.out.println("Dossiers locaux créés: " + localBasePath);
+            log.info("Dossiers locaux créés avec succès: {}", localBasePath);
         } catch (IOException e) {
+            log.error("Impossible de créer les répertoires locaux: {}", localBasePath, e);
             throw new RuntimeException("Impossible de créer les répertoires locaux", e);
         }
     }

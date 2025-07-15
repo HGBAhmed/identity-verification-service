@@ -1,9 +1,7 @@
 -- Extension pour UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ===================================
 -- TABLE : Sessions de vérification
--- ===================================
 CREATE TABLE verification_sessions (
                                        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                                        session_id VARCHAR(8) NOT NULL UNIQUE,
@@ -21,9 +19,7 @@ CREATE TABLE verification_sessions (
                                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ===================================
 -- TABLE : Fichiers
--- ===================================
 CREATE TABLE verification_files (
                                     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                                     session_id VARCHAR(8) NOT NULL,
@@ -49,9 +45,7 @@ CREATE TABLE verification_files (
                                         REFERENCES verification_sessions(session_id) ON DELETE CASCADE
 );
 
--- ===================================
 -- TABLE : Résultats de vérification
--- ===================================
 CREATE TABLE verification_results (
                                       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                                       request_id VARCHAR(8) NOT NULL UNIQUE,
@@ -87,9 +81,7 @@ CREATE TABLE verification_results (
                                           REFERENCES verification_files(id) ON DELETE SET NULL
 );
 
--- ===================================
 -- INDEX ESSENTIELS
--- ===================================
 CREATE INDEX idx_sessions_session_id ON verification_sessions(session_id);
 CREATE INDEX idx_sessions_user_identifier ON verification_sessions(user_identifier);
 CREATE INDEX idx_sessions_status ON verification_sessions(status);

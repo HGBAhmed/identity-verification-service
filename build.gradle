@@ -102,6 +102,18 @@ micronaut {
     }
 }
 
+tasks.withType(JavaExec) {
+    systemProperty "file.encoding", "UTF-8"
+    systemProperty "console.encoding", "UTF-8"
+    systemProperty "sun.stdout.encoding", "UTF-8"
+    systemProperty "sun.stderr.encoding", "UTF-8"
+
+    // Pour Windows spécifiquement
+    if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+        systemProperty "user.language", "en"
+        systemProperty "user.country", "US"
+    }
+}
 tasks.withType(JavaCompile) {
     options.compilerArgs += ['-Xlint:unchecked']
     options.encoding = 'UTF-8'
