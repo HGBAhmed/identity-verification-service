@@ -38,39 +38,104 @@ public class IdentityVerificationController {
     @Inject
     private FileValidator fileValidator;
 
+
     /**
-     * Upload et extraction
+     * Upload et extraction d'un PASSEPORT
      */
-    @Post(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Post(value = "/passport/document", consumes = MediaType.MULTIPART_FORM_DATA)
     @Secured({"VERIFICATION_USER", "ADMIN"})
-    public HttpResponse<DocumentUploadResponse> uploadDocument(
-            @Part("identityDocument") CompletedFileUpload identityDocument,
+    public HttpResponse<DocumentUploadResponse> uploadPassportDocument(
+            @Part("passportDocument") CompletedFileUpload passportDocument,
+            @Part("userIdentifier") String userIdentifier) {
+
+        log.info("Début upload passeport pour utilisateur: {}", userIdentifier);
+        return processDocumentUpload(passportDocument, userIdentifier, "PASSPORT");
+    }
+
+    /**
+     * Vérification complète PASSEPORT
+     */
+    @Post(value = "/passport/complete", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
+    public HttpResponse<VerificationResultDto> verifyPassport(
+            @Part("passportDocument") CompletedFileUpload passportDocument,
+            @Part("userPhoto") CompletedFileUpload userPhoto,
+            @Part("userIdentifier") String userIdentifier) {
+
+        log.info("Début vérification complète passeport pour utilisateur: {}", userIdentifier);
+        return processCompleteVerification(passportDocument, userPhoto, userIdentifier, "PASSPORT");
+    }
+
+    /**
+     * Upload et extraction d'une CARTE D'IDENTITÉ
+     */
+    @Post(value = "/id-card/document", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
+    public HttpResponse<DocumentUploadResponse> uploadIdCardDocument(
+            @Part("idCardDocument") CompletedFileUpload idCardDocument,
+            @Part("userIdentifier") String userIdentifier) {
+
+        log.info("Début upload carte d'identité pour utilisateur: {}", userIdentifier);
+        return processDocumentUpload(idCardDocument, userIdentifier, "ID_CARD");
+    }
+
+    /**
+     * Vérification complète CARTE D'IDENTITÉ
+     */
+    @Post(value = "/id-card/complete", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
+    public HttpResponse<VerificationResultDto> verifyIdCard(
+            @Part("idCardDocument") CompletedFileUpload idCardDocument,
+            @Part("userPhoto") CompletedFileUpload userPhoto,
+            @Part("userIdentifier") String userIdentifier) {
+
+        log.info("Début vérification complète carte d'identité pour utilisateur: {}", userIdentifier);
+        return processCompleteVerification(idCardDocument, userPhoto, userIdentifier, "ID_CARD");
+    }
+
+    /**
+     * Upload RECTO + VERSO d'une carte d'identité
+     */
+    @Post(value = "/id-card/recto-verso", consumes = MediaType.MULTIPART_FORM_DATA)
+    @Secured({"VERIFICATION_USER", "ADMIN"})
+    public HttpResponse<DocumentUploadResponse> uploadIdCardBothSides(
+            @Part("rectoDocument") CompletedFileUpload rectoDocument,
+            @Part("versoDocument") CompletedFileUpload versoDocument,
             @Part("userIdentifier") String userIdentifier) {
 
         try {
-            log.debug("Début upload document pour utilisateur: {}", userIdentifier);
+            log.info("Début upload recto/verso carte d'identité pour utilisateur: {}", userIdentifier);
 
-            // Validation du fichier
-            String docValidation = fileValidator.getValidationError(identityDocument);
-            if (docValidation != null) {
-                log.warn("Validation échouée pour document utilisateur {}: {}", userIdentifier, docValidation);
+            // Validation des deux fichiers
+            String rectoValidation = fileValidator.getValidationError(rectoDocument);
+            if (rectoValidation != null) {
+                log.warn("Validation recto échouée pour utilisateur {}: {}", userIdentifier, rectoValidation);
                 return HttpResponse.badRequest(
-                        DocumentUploadResponse.error("Document d'identité: " + docValidation)
+                        DocumentUploadResponse.error("Fichier recto: " + rectoValidation)
                 );
             }
 
-            // Utilise la méthode
+            String versoValidation = fileValidator.getValidationError(versoDocument);
+            if (versoValidation != null) {
+                log.warn("Validation verso échouée pour utilisateur {}: {}", userIdentifier, versoValidation);
+                return HttpResponse.badRequest(
+                        DocumentUploadResponse.error("Fichier verso: " + versoValidation)
+                );
+            }
+
+            // Traitement recto/verso
             IdentityVerificationService.DocumentProcessingResult result =
-                    verificationService.processDocumentOnly(userIdentifier, identityDocument);
+                    verificationService.processRectoVersoDocument(userIdentifier, rectoDocument, versoDocument);
 
             if (!result.isSuccess()) {
-                log.warn("Échec traitement document pour utilisateur {}: {}", userIdentifier, result.getError());
+                log.warn("Échec traitement recto/verso pour utilisateur {}: {}", userIdentifier, result.getError());
                 return HttpResponse.badRequest(
                         DocumentUploadResponse.error(result.getError())
                 );
             }
 
-            log.info("Document traité avec succès - Session: {} pour utilisateur: {}", result.getSessionId(), userIdentifier);
+            log.info("Recto/verso traité avec succès - Session: {} pour utilisateur: {}",
+                    result.getSessionId(), userIdentifier);
 
             // Préparer la réponse
             DocumentExtractionData responseData = new DocumentExtractionData();
@@ -78,20 +143,51 @@ public class IdentityVerificationController {
             responseData.setIssuingCountry(result.getIssuingCountry());
             responseData.setExtractedFields(result.getExtractedData());
 
-            DocumentUploadResponse response = DocumentUploadResponse.success(result.getSessionId(), responseData);
+            DocumentUploadResponse response = DocumentUploadResponse.successIdCard(
+                    result.getSessionId(), responseData, "BOTH");
 
             return HttpResponse.ok(response);
 
         } catch (Exception e) {
-            log.error("Erreur globale upload document pour utilisateur {}: {}", userIdentifier, e.getMessage(), e);
+            log.error("Erreur globale recto/verso pour utilisateur {}: {}", userIdentifier, e.getMessage(), e);
             return HttpResponse.badRequest(
                     DocumentUploadResponse.error("Erreur lors du traitement: " + e.getMessage())
             );
         }
     }
 
+//    /**
+//     * Upload et extraction
+//     */
+//    @Post(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA)
+//    @Secured({"VERIFICATION_USER", "ADMIN"})
+//    @Deprecated
+//    public HttpResponse<DocumentUploadResponse> uploadDocument(
+//            @Part("identityDocument") CompletedFileUpload identityDocument,
+//            @Part("userIdentifier") String userIdentifier) {
+//
+//        log.info("Utilisation endpoint déprécié /document pour utilisateur: {}", userIdentifier);
+//        return processDocumentUpload(identityDocument, userIdentifier, null); // Pas de validation de type
+//    }
+
+//    /**
+//     * Upload complet
+//     */
+//    @Post(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA)
+//    @Secured({"VERIFICATION_USER", "ADMIN"})
+//    @Deprecated
+//    public HttpResponse<VerificationResultDto> uploadAndVerify(
+//            @Part("identityDocument") CompletedFileUpload identityDocument,
+//            @Part("userPhoto") CompletedFileUpload userPhoto,
+//            @Part("userIdentifier") String userIdentifier) {
+//
+//        log.info("Utilisation endpoint déprécié /upload pour utilisateur: {}", userIdentifier);
+//        return processCompleteVerification(identityDocument, userPhoto, userIdentifier, null);
+//    }
+
+
     /**
-     * Upload photo et comparaison
+     * Comparaison avec photo
      */
     @Post(value = "/compare/{documentId}", consumes = MediaType.MULTIPART_FORM_DATA)
     @Secured({"VERIFICATION_USER", "ADMIN"})
@@ -102,7 +198,6 @@ public class IdentityVerificationController {
         try {
             log.debug("Début comparaison photo pour document: {}", documentId);
 
-            // Validation de la photo
             String photoValidation = fileValidator.getValidationError(userPhoto);
             if (photoValidation != null) {
                 log.warn("Validation échouée pour photo document {}: {}", documentId, photoValidation);
@@ -111,7 +206,6 @@ public class IdentityVerificationController {
                 );
             }
 
-            // Utilise la méthode
             VerificationResultDto result = verificationService.processPhotoComparison(documentId, userPhoto);
 
             if ("FAILED".equals(result.getStatus())) {
@@ -119,7 +213,8 @@ public class IdentityVerificationController {
                 return HttpResponse.badRequest(result);
             }
 
-            log.info("Comparaison terminée avec succès - Request ID: {} pour document: {}", result.getRequestId(), documentId);
+            log.info("Comparaison terminée avec succès - Request ID: {} pour document: {}",
+                    result.getRequestId(), documentId);
             return HttpResponse.ok(result);
 
         } catch (Exception e) {
@@ -130,29 +225,111 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Upload complet
-     */
-    @Post(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA)
-    @Secured({"VERIFICATION_USER", "ADMIN"})
-    public HttpResponse<VerificationResultDto> uploadAndVerify(
-            @Part("identityDocument") CompletedFileUpload identityDocument,
-            @Part("userPhoto") CompletedFileUpload userPhoto,
-            @Part("userIdentifier") String userIdentifier) {
+    //  MÉTHODES PRIVÉES COMMUNES
+
+    private HttpResponse<DocumentUploadResponse> processDocumentUpload(
+            CompletedFileUpload document, String userIdentifier, String expectedType) {
 
         try {
-            log.debug("Début vérification complète pour utilisateur: {}", userIdentifier);
+            log.debug("Début traitement document pour utilisateur: {}, type attendu: {}",
+                    userIdentifier, expectedType);
 
-            VerificationResultDto result = verificationService.processVerification(
-                    userIdentifier, identityDocument, userPhoto
+            // Validation du fichier
+            String docValidation = fileValidator.getValidationError(document);
+            if (docValidation != null) {
+                log.warn("Validation échouée pour document utilisateur {}: {}", userIdentifier, docValidation);
+                return HttpResponse.badRequest(
+                        DocumentUploadResponse.error("Document: " + docValidation)
+                );
+            }
+
+            // Traitement avec validation de type si spécifié
+            IdentityVerificationService.DocumentProcessingResult result;
+            if (expectedType != null) {
+                result = verificationService.processDocumentWithTypeValidation(userIdentifier, document, expectedType);
+            } else {
+                result = verificationService.processDocumentOnly(userIdentifier, document);
+            }
+
+            if (!result.isSuccess()) {
+                log.warn("Échec traitement document pour utilisateur {}: {}", userIdentifier, result.getError());
+                return HttpResponse.badRequest(
+                        DocumentUploadResponse.error(result.getError())
+                );
+            }
+
+            log.info("Document traité avec succès - Session: {} pour utilisateur: {}",
+                    result.getSessionId(), userIdentifier);
+
+            // Préparer la réponse
+            DocumentExtractionData responseData = new DocumentExtractionData();
+            responseData.setDocumentType(result.getDocumentType());
+            responseData.setIssuingCountry(result.getIssuingCountry());
+            responseData.setExtractedFields(result.getExtractedData());
+
+            DocumentUploadResponse response;
+            if (expectedType != null && expectedType.equals("PASSPORT")) {
+                response = DocumentUploadResponse.successPassport(result.getSessionId(), responseData);
+            } else if (expectedType != null && expectedType.equals("ID_CARD")) {
+                response = DocumentUploadResponse.successIdCard(result.getSessionId(), responseData, "RECTO");
+            } else {
+                response = DocumentUploadResponse.success(result.getSessionId(), responseData);
+            }
+
+            return HttpResponse.ok(response);
+
+        } catch (Exception e) {
+            log.error("Erreur globale traitement document pour utilisateur {}: {}", userIdentifier, e.getMessage(), e);
+            return HttpResponse.badRequest(
+                    DocumentUploadResponse.error("Erreur lors du traitement: " + e.getMessage())
             );
+        }
+    }
+
+    private HttpResponse<VerificationResultDto> processCompleteVerification(
+            CompletedFileUpload document, CompletedFileUpload photo, String userIdentifier, String expectedType) {
+
+        try {
+            log.debug("Début vérification complète pour utilisateur: {}, type attendu: {}",
+                    userIdentifier, expectedType);
+
+            // Validation des fichiers
+            String docValidation = fileValidator.getValidationError(document);
+            if (docValidation != null) {
+                log.warn("Validation document échouée pour utilisateur {}: {}", userIdentifier, docValidation);
+                String requestId = sessionService.generateShortRequestId();
+                VerificationResultDto errorResult = VerificationResultDto.error("Document: " + docValidation);
+                errorResult.setRequestId(requestId);
+                resultService.saveErrorResult(requestId, userIdentifier, "Validation document: " + docValidation, null);
+                return HttpResponse.badRequest(errorResult);
+            }
+
+            String photoValidation = fileValidator.getValidationError(photo);
+            if (photoValidation != null) {
+                log.warn("Validation photo échouée pour utilisateur {}: {}", userIdentifier, photoValidation);
+                String requestId = sessionService.generateShortRequestId();
+                VerificationResultDto errorResult = VerificationResultDto.error("Photo: " + photoValidation);
+                errorResult.setRequestId(requestId);
+                resultService.saveErrorResult(requestId, userIdentifier, "Validation photo: " + photoValidation, null);
+                return HttpResponse.badRequest(errorResult);
+            }
+
+            // Traitement avec validation de type si spécifié
+            VerificationResultDto result;
+            if (expectedType != null) {
+                result = verificationService.processVerificationWithTypeValidation(
+                        userIdentifier, document, photo, expectedType);
+            } else {
+                result = verificationService.processVerification(userIdentifier, document, photo);
+            }
 
             if ("FAILED".equals(result.getStatus())) {
                 log.warn("Vérification complète échouée pour utilisateur: {}", userIdentifier);
                 return HttpResponse.badRequest(result);
             }
 
-            log.info("Vérification complète réussie pour utilisateur: {} - Request ID: {}", userIdentifier, result.getRequestId());
+            log.info("Vérification complète réussie pour utilisateur: {} - Request ID: {}",
+                    userIdentifier, result.getRequestId());
             return HttpResponse.ok(result);
 
         } catch (Exception e) {
@@ -163,9 +340,6 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Récupérer un résultat par son ID
-     */
     @Get("/result/{requestId}")
     @Secured({"ADMIN", "VERIFICATION_USER", "VIEWER"})
     public HttpResponse<VerificationResultDto> getResult(@PathVariable String requestId) {
@@ -173,41 +347,28 @@ public class IdentityVerificationController {
             log.debug("Recherche résultat pour requestId: {}", requestId);
 
             var result = resultService.getResult(requestId);
-            log.debug("Résultat trouvé: {}", (result != null));
-
             if (result == null) {
                 log.debug("Aucun résultat trouvé pour requestId: {}", requestId);
                 return HttpResponse.notFound();
             }
 
-            log.debug("Détails résultat - ID: {}, Request ID: {}, User ID: {}",
-                    result.getId(), result.getRequestId(), result.getUserIdentifier());
-
-            log.debug("Conversion en DTO pour requestId: {}", requestId);
             VerificationResultDto dto = resultService.convertToDto(result);
-            log.debug("DTO créé avec succès pour requestId: {}", requestId);
-
             return HttpResponse.ok(dto);
 
         } catch (Exception e) {
-            log.error("Erreur détaillée récupération résultat pour requestId {}: {} - {}",
-                    requestId, e.getClass().getSimpleName(), e.getMessage(), e);
+            log.error("Erreur récupération résultat pour requestId {}: {}", requestId, e.getMessage(), e);
             return HttpResponse.badRequest(
                     VerificationResultDto.error("Erreur récupération résultat: " + e.getMessage())
             );
         }
     }
 
-    /**
-     * Historique des vérifications d'un utilisateur
-     */
     @Get("/history/{userIdentifier}")
     @Secured({"ADMIN", "VERIFICATION_USER", "VIEWER"})
     public HttpResponse<java.util.List<VerificationResultDto>> getUserHistory(@PathVariable String userIdentifier) {
         try {
             log.debug("Recherche historique pour utilisateur: {}", userIdentifier);
 
-            // Vérifier si l'utilisateur a déjà fait des vérifications
             if (!resultService.userHasVerificationHistory(userIdentifier)) {
                 log.debug("Aucun historique trouvé pour utilisateur: {}", userIdentifier);
                 return HttpResponse.notFound();
@@ -218,7 +379,8 @@ public class IdentityVerificationController {
                     .map(resultService::convertToDto)
                     .toList();
 
-            log.info("Historique récupéré avec succès pour utilisateur: {} - {} résultats", userIdentifier, dtos.size());
+            log.info("Historique récupéré avec succès pour utilisateur: {} - {} résultats",
+                    userIdentifier, dtos.size());
             return HttpResponse.ok(dtos);
 
         } catch (Exception e) {
@@ -227,9 +389,6 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Statistiques de vérification
-     */
     @Get("/stats/today")
     @Secured("ADMIN")
     public HttpResponse<VerificationResultService.VerificationStats> getTodayStats() {
@@ -244,9 +403,6 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Statistiques de vérification
-     */
     @Get("/stats/week")
     @Secured("ADMIN")
     public HttpResponse<VerificationResultService.VerificationStats> getWeekStats() {
@@ -261,9 +417,6 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Health check
-     */
     @Get("/health")
     @Secured(SecurityRule.IS_ANONYMOUS)
     public HttpResponse<String> health() {
@@ -271,35 +424,29 @@ public class IdentityVerificationController {
         return HttpResponse.ok("Identity Verification Service is running");
     }
 
-    /**
-     * Nombre de sessions
-     */
-    @Get("/sessions/count")
-    @Secured("ADMIN")
-    public HttpResponse<String> getSessionsCount() {
-        int count = sessionService.getActiveSessionsCount();
-        log.info("Nombre de sessions actives: {}", count);
-        return HttpResponse.ok("Sessions actives: " + count);
-    }
+//    @Get("/sessions/count")
+//    @Secured("ADMIN")
+//    public HttpResponse<String> getSessionsCount() {
+//        int count = sessionService.getActiveSessionsCount();
+//        log.info("Nombre de sessions actives: {}", count);
+//        return HttpResponse.ok("Sessions actives: " + count);
+//    }
 
-    /**
-     * Endpoint de diagnostic pour OpenKM
-     */
-    @Get("/status/storage")
-    @Secured("ADMIN")
-    public HttpResponse<java.util.Map<String, Object>> getStorageStatus() {
-        try {
-            log.debug("Récupération statut de stockage");
-            var status = new java.util.HashMap<String, Object>();
-            status.put("openKMEnabled", true); // À récupérer depuis FileStorageService
-            status.put("activeSessionsCount", sessionService.getActiveSessionsCount());
-            status.put("todayStats", resultService.getTodayStats());
-
-            log.info("Statut de stockage récupéré avec succès");
-            return HttpResponse.ok(status);
-        } catch (Exception e) {
-            log.error("Erreur récupération statut de stockage: {}", e.getMessage(), e);
-            return HttpResponse.serverError();
-        }
-    }
+//    @Get("/status/storage")
+//    @Secured("ADMIN")
+//    public HttpResponse<java.util.Map<String, Object>> getStorageStatus() {
+//        try {
+//            log.debug("Récupération statut de stockage");
+//            var status = new java.util.HashMap<String, Object>();
+//            status.put("openKMEnabled", true);
+//            status.put("activeSessionsCount", sessionService.getActiveSessionsCount());
+//            status.put("todayStats", resultService.getTodayStats());
+//
+//            log.info("Statut de stockage récupéré avec succès");
+//            return HttpResponse.ok(status);
+//        } catch (Exception e) {
+//            log.error("Erreur récupération statut de stockage: {}", e.getMessage(), e);
+//            return HttpResponse.serverError();
+//        }
+//    }
 }

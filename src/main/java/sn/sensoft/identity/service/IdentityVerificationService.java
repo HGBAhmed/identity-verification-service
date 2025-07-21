@@ -41,6 +41,244 @@ public class IdentityVerificationService {
         log.info("IdentityVerificationService initialisé");
     }
 
+    //  Méthode +veirfication de type
+
+    /**
+     * Traitement document avec validation du type attendu
+     */
+    @Transactional
+    public DocumentProcessingResult processDocumentWithTypeValidation(String userIdentifier,
+                                                                      CompletedFileUpload document,
+                                                                      String expectedType) {
+        log.info("Début traitement document avec validation type pour utilisateur: {}, type attendu: {}",
+                userIdentifier, expectedType);
+
+        try {
+            // Traitement normal
+            DocumentProcessingResult result = processDocumentOnly(userIdentifier, document);
+
+            if (result.isSuccess()) {
+                // Vérifier que le type détecté correspond au type attendu
+                String detectedType = determineDocumentType(result.getDocumentType());
+
+                if (!isTypeCompatible(expectedType, detectedType)) {
+                    log.warn("Type de document incorrect pour utilisateur {}: attendu {}, détecté {}",
+                            userIdentifier, expectedType, detectedType);
+                    return DocumentProcessingResult.error(
+                            "Type de document incorrect. Attendu: " + expectedType +
+                                    ", Détecté: " + detectedType
+                    );
+                }
+
+                log.info("Validation de type réussie pour utilisateur {}: {} confirmé",
+                        userIdentifier, expectedType);
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur traitement document avec validation type pour utilisateur {}: {}",
+                    userIdentifier, e.getMessage(), e);
+            return DocumentProcessingResult.error("Erreur traitement: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Vérification complète avec validation du type attendu
+     */
+    @Transactional
+    public VerificationResultDto processVerificationWithTypeValidation(String userIdentifier,
+                                                                       CompletedFileUpload document,
+                                                                       CompletedFileUpload photo,
+                                                                       String expectedType) {
+        log.info("Début vérification complète avec validation type pour utilisateur: {}, type attendu: {}",
+                userIdentifier, expectedType);
+
+        try {
+            // Traitement normal
+            VerificationResultDto result = processVerification(userIdentifier, document, photo);
+
+            if (!"FAILED".equals(result.getStatus())) {
+                // Vérifier le type si on a des données de document
+                if (result.getDocumentData() != null && result.getDocumentData().getDocumentType() != null) {
+                    String detectedType = determineDocumentType(result.getDocumentData().getDocumentType());
+
+                    if (!isTypeCompatible(expectedType, detectedType)) {
+                        log.warn("Type de document incorrect lors de la vérification complète pour utilisateur {}: attendu {}, détecté {}",
+                                userIdentifier, expectedType, detectedType);
+
+                        String requestId = sessionService.generateShortRequestId();
+                        VerificationResultDto errorResult = VerificationResultDto.error(
+                                "Type de document incorrect. Attendu: " + expectedType +
+                                        ", Détecté: " + detectedType
+                        );
+                        errorResult.setRequestId(requestId);
+
+                        resultService.saveErrorResult(requestId, userIdentifier,
+                                "Type incorrect: " + expectedType + " vs " + detectedType, null);
+                        return errorResult;
+                    }
+
+                    log.info("Validation de type réussie lors de la vérification complète pour utilisateur {}: {} confirmé",
+                            userIdentifier, expectedType);
+                }
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur vérification complète avec validation type pour utilisateur {}: {}",
+                    userIdentifier, e.getMessage(), e);
+
+            String requestId = sessionService.generateShortRequestId();
+            VerificationResultDto errorResult = VerificationResultDto.error("Erreur traitement: " + e.getMessage());
+            errorResult.setRequestId(requestId);
+
+            resultService.saveErrorResult(requestId, userIdentifier, "Erreur: " + e.getMessage(), null);
+            return errorResult;
+        }
+    }
+
+    /**
+     * Traitement recto/verso pour cartes d'identité
+     */
+    @Transactional
+    public DocumentProcessingResult processRectoVersoDocument(String userIdentifier,
+                                                              CompletedFileUpload rectoDocument,
+                                                              CompletedFileUpload versoDocument) {
+        String sessionId = null;
+        UUID rectoFileId = null;
+        UUID versoFileId = null;
+
+        log.info("Début traitement recto/verso pour utilisateur: {}", userIdentifier);
+
+        try {
+            // Validation des fichiers
+            String rectoValidation = fileValidator.getValidationError(rectoDocument);
+            if (rectoValidation != null) {
+                log.warn("Validation recto échouée pour utilisateur {}: {}", userIdentifier, rectoValidation);
+                return DocumentProcessingResult.error("Fichier recto: " + rectoValidation);
+            }
+
+            String versoValidation = fileValidator.getValidationError(versoDocument);
+            if (versoValidation != null) {
+                log.warn("Validation verso échouée pour utilisateur {}: {}", userIdentifier, versoValidation);
+                return DocumentProcessingResult.error("Fichier verso: " + versoValidation);
+            }
+
+            // Créer session temporaire
+            sessionId = sessionService.createTemporarySession(userIdentifier);
+            log.info("Session temporaire créée: {} pour utilisateur: {}", sessionId, userIdentifier);
+
+            // Sauvegarder les fichiers
+            log.debug("Sauvegarde fichier recto pour session: {}", sessionId);
+            FileStorageService.FileStorageResult rectoResult = fileStorageService.saveIdentityDocument(rectoDocument, sessionId);
+            if (!rectoResult.isSuccess()) {
+                log.error("Erreur sauvegarde recto pour session {}: {}", sessionId, rectoResult.getError());
+                return DocumentProcessingResult.error("Erreur sauvegarde recto: " + rectoResult.getError());
+            }
+            rectoFileId = rectoResult.getFileId();
+
+            log.debug("Sauvegarde fichier verso pour session: {}", sessionId);
+            FileStorageService.FileStorageResult versoResult = fileStorageService.saveIdentityDocument(versoDocument, sessionId);
+            if (!versoResult.isSuccess()) {
+                log.error("Erreur sauvegarde verso pour session {}: {}", sessionId, versoResult.getError());
+                return DocumentProcessingResult.error("Erreur sauvegarde verso: " + versoResult.getError());
+            }
+            versoFileId = versoResult.getFileId();
+
+            log.info("Fichiers recto/verso sauvegardés avec succès - Session: {}, Recto: {}, Verso: {}",
+                    sessionId, rectoFileId, versoFileId);
+
+            // Extraction des données avec les deux fichiers
+            log.debug("Début extraction recto/verso pour session: {}", sessionId);
+            DocumentExtractionService.DocumentExtractionResult extraction = null;
+
+            try {
+                // Récupérer les chemins pour traitement
+                String rectoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
+                String versoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
+
+                // Utiliser la nouvelle méthode d'extraction recto/verso
+                extraction = documentExtractionService.extractRectoVersoData(rectoPath, versoPath);
+
+                if (extraction.isSuccessful()) {
+                    log.info("Extraction recto/verso réussie pour session: {} - Type: {}, Pays: {}",
+                            sessionId, extraction.getDocumentType(), extraction.getIssuingCountry());
+                } else {
+                    log.warn("Extraction recto/verso échouée pour session: {} - Erreur: {}",
+                            sessionId, extraction.getError());
+                    return DocumentProcessingResult.error("Échec extraction recto/verso: " + extraction.getError());
+                }
+            } catch (Exception e) {
+                log.error("Erreur extraction recto/verso pour session {}: {}", sessionId, e.getMessage(), e);
+                return DocumentProcessingResult.error("Erreur extraction recto/verso: " + e.getMessage());
+            }
+
+            // Mettre à jour la session avec les données d'extraction
+            sessionService.updateSessionWithExtractionData(
+                    sessionId,
+                    extraction.getDocumentType(),
+                    extraction.getIssuingCountry(),
+                    extraction.getExtractedData()
+            );
+
+            log.info("Traitement recto/verso terminé avec succès - Session: {}", sessionId);
+
+            return DocumentProcessingResult.success(
+                    sessionId,
+                    extraction.getDocumentType(),
+                    extraction.getIssuingCountry(),
+                    extraction.getExtractedData()
+            );
+
+        } catch (Exception e) {
+            log.error("Erreur traitement recto/verso pour utilisateur {}: {}", userIdentifier, e.getMessage(), e);
+            return DocumentProcessingResult.error("Erreur traitement recto/verso: " + e.getMessage());
+        }
+    }
+
+    // MÉTHODES UTILITAIRES
+
+    /**
+     * Détermine le type générique à partir du type détecté
+     */
+    private String determineDocumentType(String extractedType) {
+        if (extractedType == null) {
+            return "UNKNOWN";
+        }
+
+        if (extractedType.equals("PASSPORT")) {
+            return "PASSPORT";
+        } else if (extractedType.startsWith("ID_CARD")) {
+            return "ID_CARD";
+        }
+
+        return "UNKNOWN";
+    }
+
+    /**
+     * Vérifie la compatibilité entre le type attendu et le type détecté
+     */
+    private boolean isTypeCompatible(String expected, String detected) {
+        if (expected == null || detected == null) {
+            return true; // Pas de validation si types non spécifiés
+        }
+
+        // Correspondance exacte
+        if (expected.equals(detected)) {
+            return true;
+        }
+
+        // ID_CARD générique accepte tous les types de cartes d'identité
+        if (expected.equals("ID_CARD") && detected.equals("ID_CARD")) {
+            return true;
+        }
+
+        return false;
+    }
+
+
     @Transactional
     public VerificationResultDto processVerification(String userIdentifier,
                                                      CompletedFileUpload identityDocument,
@@ -62,9 +300,7 @@ public class IdentityVerificationService {
                 VerificationResultDto errorResult = VerificationResultDto.error("Document d'identité: " + docValidation);
                 errorResult.setRequestId(requestId);
 
-                // Sauvegarder l'erreur
                 resultService.saveErrorResult(requestId, userIdentifier, "Validation document: " + docValidation, null);
-
                 return errorResult;
             }
 
@@ -75,9 +311,7 @@ public class IdentityVerificationService {
                 VerificationResultDto errorResult = VerificationResultDto.error("Photo utilisateur: " + photoValidation);
                 errorResult.setRequestId(requestId);
 
-                // Sauvegarder l'erreur
                 resultService.saveErrorResult(requestId, userIdentifier, "Validation photo: " + photoValidation, null);
-
                 return errorResult;
             }
 
@@ -120,7 +354,6 @@ public class IdentityVerificationService {
             log.debug("Début extraction document pour session: {}", sessionId);
             DocumentExtractionService.DocumentExtractionResult documentExtraction = null;
             try {
-                // Récupérer le chemin pour traitement (peut être temporaire depuis OpenKM)
                 String docPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
                 documentExtraction = documentExtractionService.extractDocumentData(docPath);
 
@@ -132,13 +365,11 @@ public class IdentityVerificationService {
                 }
             } catch (Exception e) {
                 log.error("Erreur extraction document pour session {}: {}", sessionId, e.getMessage(), e);
-                // On continue même si l'extraction échoue
             }
 
             // COMPARAISON FACIALE
             log.debug("Début comparaison faciale pour session: {}", sessionId);
             try {
-                // Récupérer les chemins pour traitement
                 String docPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
                 String photoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.USER_PHOTO);
 
@@ -186,10 +417,7 @@ public class IdentityVerificationService {
                     }
                 }
 
-                // Sauvegarder le résultat
                 resultService.saveVerificationResult(result, sessionId, documentFileId, photoFileId);
-
-                // Marquer la session comme terminée
                 sessionService.markSessionAsCompleted(sessionId);
 
                 log.info("Vérification complète terminée avec succès - Session: {}, RequestId: {}, Match: {}",
@@ -215,14 +443,10 @@ public class IdentityVerificationService {
             resultService.saveErrorResult(requestId, userIdentifier, "Erreur globale: " + e.getMessage(), sessionId);
             return errorResult;
         } finally {
-            // Nettoyage des fichiers temporaires après traitement
             cleanupTempFiles();
         }
     }
 
-    /**
-     * Traitement document seul
-     */
     @Transactional
     public DocumentProcessingResult processDocumentOnly(String userIdentifier, CompletedFileUpload identityDocument) {
         String sessionId = null;
@@ -231,18 +455,15 @@ public class IdentityVerificationService {
         log.info("Début traitement document seul pour utilisateur: {}", userIdentifier);
 
         try {
-            // Validation
             String docValidation = fileValidator.getValidationError(identityDocument);
             if (docValidation != null) {
                 log.warn("Validation document échouée pour utilisateur {}: {}", userIdentifier, docValidation);
                 return DocumentProcessingResult.error("Document d'identité: " + docValidation);
             }
 
-            // Créer session temporaire EN BASE
             sessionId = sessionService.createTemporarySession(userIdentifier);
             log.info("Session temporaire créée: {} pour utilisateur: {}", sessionId, userIdentifier);
 
-            //  Sauvegarder le document
             log.debug("Sauvegarde document pour session: {}", sessionId);
             FileStorageService.FileStorageResult docResult = fileStorageService.saveIdentityDocument(identityDocument, sessionId);
             if (!docResult.isSuccess()) {
@@ -251,7 +472,6 @@ public class IdentityVerificationService {
             }
             documentFileId = docResult.getFileId();
 
-            //  Extraction
             log.debug("Début extraction document pour session: {}", sessionId);
             String docPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
             DocumentExtractionService.DocumentExtractionResult extraction =
@@ -265,7 +485,6 @@ public class IdentityVerificationService {
             log.info("Extraction document réussie pour session: {} - Type: {}, Pays: {}",
                     sessionId, extraction.getDocumentType(), extraction.getIssuingCountry());
 
-            //  Mettre à jour la session avec les données d'extraction
             sessionService.updateSessionWithExtractionData(
                     sessionId,
                     extraction.getDocumentType(),
@@ -288,9 +507,6 @@ public class IdentityVerificationService {
         }
     }
 
-    /**
-     * Comparaison avec photo
-     */
     @Transactional
     public VerificationResultDto processPhotoComparison(String documentId, CompletedFileUpload userPhoto) {
         UUID photoFileId = null;
@@ -298,7 +514,6 @@ public class IdentityVerificationService {
         log.info("Début comparaison photo pour document: {}", documentId);
 
         try {
-            // Récupérer la session
             VerificationSession session = sessionService.getSession(documentId);
             if (session == null) {
                 log.warn("Session non trouvée ou expirée: {}", documentId);
@@ -312,7 +527,6 @@ public class IdentityVerificationService {
 
             log.debug("Session récupérée: {} pour utilisateur: {}", documentId, session.getUserIdentifier());
 
-            // Validation photo
             String photoValidation = fileValidator.getValidationError(userPhoto);
             if (photoValidation != null) {
                 log.warn("Validation photo échouée pour document {}: {}", documentId, photoValidation);
@@ -324,7 +538,6 @@ public class IdentityVerificationService {
                 return errorResult;
             }
 
-            // Sauvegarder la photo
             log.debug("Sauvegarde photo pour document: {}", documentId);
             FileStorageService.FileStorageResult photoResult = fileStorageService.saveUserPhoto(userPhoto, documentId);
             if (!photoResult.isSuccess()) {
@@ -340,7 +553,6 @@ public class IdentityVerificationService {
 
             log.debug("Photo sauvegardée avec succès: {} pour document: {}", photoFileId, documentId);
 
-            // Comparaison faciale
             log.debug("Début comparaison faciale pour document: {}", documentId);
             String docPath = fileStorageService.getFilePathForProcessing(documentId, FileType.IDENTITY_DOCUMENT);
             String photoPath = fileStorageService.getFilePathForProcessing(documentId, FileType.USER_PHOTO);
@@ -351,7 +563,6 @@ public class IdentityVerificationService {
             log.info("Comparaison faciale terminée pour document: {} - Vérifié: {}, Confiance: {:.3f}",
                     documentId, faceComparison.isVerified(), faceComparison.getConfidence());
 
-            // Créer et sauvegarder le résultat
             String requestId = sessionService.generateShortRequestId();
             VerificationResultDto result = VerificationResultDto.successWithData(
                     requestId,
@@ -363,13 +574,10 @@ public class IdentityVerificationService {
                     session.getIssuingCountry()
             );
 
-            //Récupérer l'ID du fichier document correctement
             VerificationFile documentFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOCUMENT);
             UUID documentFileId = documentFile != null ? documentFile.getId() : null;
 
             resultService.saveVerificationResult(result, documentId, documentFileId, photoFileId);
-
-            // Marquer la session comme terminée
             sessionService.markSessionAsCompleted(documentId);
 
             log.info("Comparaison photo terminée avec succès - Document: {}, RequestId: {}, Match: {}",
@@ -390,8 +598,6 @@ public class IdentityVerificationService {
             cleanupTempFiles();
         }
     }
-
-    // MÉTHODES UTILITAIRES
 
     private void cleanupTempFiles() {
         try {
@@ -430,7 +636,6 @@ public class IdentityVerificationService {
             return new DocumentProcessingResult(false, null, null, null, null, error);
         }
 
-        // Getters
         public boolean isSuccess() { return success; }
         public String getSessionId() { return sessionId; }
         public String getDocumentType() { return documentType; }
