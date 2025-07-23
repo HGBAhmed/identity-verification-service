@@ -40,5 +40,6 @@ public interface VerificationFileRepository extends JpaRepository<VerificationFi
     Optional<Long> sumFileSizeByFileType(FileType fileType);
 
     // à ajouter parce que micronaut ne le fait pas auto
+    @Override
     VerificationFile update(VerificationFile file);
 }

@@ -82,6 +82,7 @@ public class FaceComparisonService {
 
             log.debug("JSON extrait pour comparaison: {}", jsonLine);
 
+            @SuppressWarnings("unchecked")
             Map<String, Object> jsonNode = objectMapper.readValue(jsonLine, Map.class);
 
             FaceComparisonResult result = new FaceComparisonResult();

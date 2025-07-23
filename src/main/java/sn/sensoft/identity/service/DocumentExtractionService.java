@@ -118,6 +118,7 @@ public class DocumentExtractionService {
             String jsonContent = output.substring(startIndex, endIndex + 1);
             log.debug("JSON extrait pour document: {}", jsonContent);
 
+            @SuppressWarnings("unchecked")
             Map<String, Object> jsonNode = objectMapper.readValue(jsonContent, Map.class);
 
             DocumentExtractionResult result = new DocumentExtractionResult();

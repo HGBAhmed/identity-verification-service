@@ -6,6 +6,7 @@ import io.micronaut.http.multipart.CompletedFileUpload;
 import sn.sensoft.identity.entity.FileType;
 import sn.sensoft.identity.entity.VerificationFile;
 import sn.sensoft.identity.repository.VerificationFileRepository;
+import sn.sensoft.identity.util.FileValidator;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.transaction.Transactional;
@@ -20,6 +21,11 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
+import java.awt.image.BufferedImage;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+
 @Singleton
 public class FileStorageService {
 
@@ -27,20 +33,27 @@ public class FileStorageService {
 
     private final OpenKMService openKMService;
     private final VerificationFileRepository fileRepository;
+    private final FileValidator fileValidator;
+    private final PdfConversionService pdfConversionService;
     private final boolean openKMEnabled;
     private final String localBasePath;
 
     @Inject
     public FileStorageService(OpenKMService openKMService,
                               VerificationFileRepository fileRepository,
+                              FileValidator fileValidator,
+                              PdfConversionService pdfConversionService,
                               @Value("${app.openkm.enabled:true}") boolean openKMEnabled,
                               @Value("${app.file-storage.base-path}") String localBasePath) {
         this.openKMService = openKMService;
         this.fileRepository = fileRepository;
+        this.fileValidator = fileValidator;
+        this.pdfConversionService = pdfConversionService;
         this.openKMEnabled = openKMEnabled;
         this.localBasePath = localBasePath;
 
-        log.info("FileStorageService initialisé - OpenKM: {}, Chemin local: {}", openKMEnabled, localBasePath);
+        log.info("FileStorageService initialisé - OpenKM: {}, Chemin local: {}, Support PDF: activé",
+                openKMEnabled, localBasePath);
 
         if (!openKMEnabled) {
             createLocalDirectories();
@@ -52,27 +65,283 @@ public class FileStorageService {
     @Transactional
     public FileStorageResult saveIdentityDocument(CompletedFileUpload file, String sessionId) throws IOException {
         log.debug("Sauvegarde document d'identité pour session: {}, fichier: {}", sessionId, file.getFilename());
-
-        if (openKMEnabled) {
-            return saveFileToOpenKM(file, sessionId, FileType.IDENTITY_DOCUMENT);
-        } else {
-            return saveFileLocally(file, sessionId, FileType.IDENTITY_DOCUMENT, "identity_documents");
-        }
+        return saveFileWithPdfSupport(file, sessionId, FileType.IDENTITY_DOCUMENT);
     }
 
     @Transactional
     public FileStorageResult saveUserPhoto(CompletedFileUpload file, String sessionId) throws IOException {
         log.debug("Sauvegarde photo utilisateur pour session: {}, fichier: {}", sessionId, file.getFilename());
 
-        if (openKMEnabled) {
-            return saveFileToOpenKM(file, sessionId, FileType.USER_PHOTO);
-        } else {
-            return saveFileLocally(file, sessionId, FileType.USER_PHOTO, "user_photos");
+        // Les photos utilisateur ne doivent pas être des PDF
+        if (fileValidator.isPDF(file)) {
+            throw new IOException("Les photos utilisateur ne peuvent pas être des fichiers PDF");
+        }
+
+        return saveFileWithPdfSupport(file, sessionId, FileType.USER_PHOTO);
+    }
+
+    // Sauvegarde avec support PDF ET gestion des bytes cachés
+    private FileStorageResult saveFileWithPdfSupport(CompletedFileUpload originalFile,
+                                                     String sessionId, FileType fileType) throws IOException {
+        try {
+            log.debug("Traitement fichier avec support PDF - Session: {}, Type: {}, Fichier: {}",
+                    sessionId, fileType, originalFile.getFilename());
+
+            CompletedFileUpload fileToProcess = originalFile;
+            String conversionInfo = null;
+
+            //Vérifier si on a des bytes en cache
+            byte[] cachedBytes = fileValidator.getCachedBytes(originalFile);
+            boolean hasCachedBytes = (cachedBytes != null);
+
+            log.debug("Bytes en cache disponibles: {} pour fichier: {}", hasCachedBytes, originalFile.getFilename());
+
+            // Vérification et conversion PDF si nécessaire
+            if (fileValidator.isPDF(originalFile)) {
+                log.info("Fichier PDF détecté, conversion en cours - Fichier: {}", originalFile.getFilename());
+
+                PdfConversionService.PdfConversionResult conversionResult =
+                        pdfConversionService.convertPdfToImage(originalFile);
+
+                if (!conversionResult.isSuccess()) {
+                    throw new IOException("Échec conversion PDF: " + conversionResult.getError());
+                }
+
+                fileToProcess = conversionResult.getConvertedFile();
+                conversionInfo = String.format("Converti depuis PDF (%dx%d, %d pages)",
+                        conversionResult.getImageWidth(),
+                        conversionResult.getImageHeight(),
+                        conversionResult.getPdfPageCount());
+
+                // Reset cache car fichier converti
+                cachedBytes = null;
+                hasCachedBytes = false;
+
+                log.info("Conversion PDF réussie - {} → {} ({}x{})",
+                        originalFile.getFilename(),
+                        fileToProcess.getFilename(),
+                        conversionResult.getImageWidth(),
+                        conversionResult.getImageHeight());
+            }
+
+            // Sauvegarde avec cache ou normale
+            FileStorageResult result;
+            if (openKMEnabled) {
+                if (hasCachedBytes) {
+                    log.debug("Utilisation cache bytes pour sauvegarde OpenKM");
+                    result = saveFileToOpenKMWithCachedBytes(originalFile, cachedBytes, sessionId, fileType);
+                } else {
+                    log.debug("Sauvegarde OpenKM normale");
+                    result = saveFileToOpenKM(fileToProcess, sessionId, fileType);
+                }
+            } else {
+                String subDirectory = fileType == FileType.IDENTITY_DOCUMENT ? "identity_documents" : "user_photos";
+                if (hasCachedBytes) {
+                    log.debug("Utilisation cache bytes pour sauvegarde locale");
+                    result = saveFileLocallyWithCachedBytes(originalFile, cachedBytes, sessionId, fileType, subDirectory);
+                } else {
+                    log.debug("Sauvegarde locale normale");
+                    result = saveFileLocally(fileToProcess, sessionId, fileType, subDirectory);
+                }
+            }
+
+            // Ajout informations de conversion aux métadonnées
+            if (result.isSuccess() && conversionInfo != null) {
+                VerificationFile verificationFile = fileRepository.findById(result.getFileId()).orElse(null);
+                if (verificationFile != null) {
+                    String updatedFilename = String.format("%s [%s]",
+                            verificationFile.getOriginalFilename(), conversionInfo);
+                    verificationFile.setOriginalFilename(updatedFilename);
+                    fileRepository.update(verificationFile);
+                    log.debug("Métadonnées de conversion ajoutées: {}", conversionInfo);
+                }
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur sauvegarde fichier avec support PDF - Session: {}, Fichier: {}",
+                    sessionId, originalFile.getFilename(), e);
+            throw new IOException("Erreur sauvegarde: " + e.getMessage(), e);
+        } finally {
+            //Nettoyer le cache dans tous les cas
+            fileValidator.clearCache(originalFile);
+        }
+    }
+
+    //Sauvegarde OpenKM avec bytes cachés
+    private FileStorageResult saveFileToOpenKMWithCachedBytes(CompletedFileUpload originalFile, byte[] cachedBytes,
+                                                              String sessionId, FileType fileType) throws IOException {
+        try {
+            log.debug("Upload vers OpenKM  - Session: {}, Type: {}, Fichier: {}",
+                    sessionId, fileType, originalFile.getFilename());
+
+            // Créer un wrapper qui utilise les bytes cachés
+            CachedBytesFileUpload cachedFile = new CachedBytesFileUpload(originalFile, cachedBytes);
+
+            // Upload vers OpenKM avec le wrapper
+            OpenKMService.OpenKMUploadResult uploadResult;
+            if (fileType == FileType.IDENTITY_DOCUMENT) {
+                uploadResult = openKMService.uploadIdentityDocument(cachedFile);
+            } else {
+                uploadResult = openKMService.uploadUserPhoto(cachedFile);
+            }
+
+            if (!uploadResult.isSuccess()) {
+                log.error("Échec upload OpenKM pour session {}: {}", sessionId, uploadResult.getError());
+                return FileStorageResult.error("Erreur upload OpenKM: " + uploadResult.getError());
+            }
+
+            // Sauvegarder les métadonnées en PostgreSQL
+            VerificationFile verificationFile = new VerificationFile(
+                    sessionId,
+                    fileType,
+                    uploadResult.getOpenkmUuid(),
+                    uploadResult.getOpenkmPath(),
+                    uploadResult.getOpenkmFolder()
+            );
+
+            verificationFile.setOriginalFilename(uploadResult.getOriginalFilename());
+            verificationFile.setContentType(uploadResult.getContentType());
+            verificationFile.setFileSize(uploadResult.getFileSize());
+
+            verificationFile = fileRepository.save(verificationFile);
+
+            log.info("Fichier sauvegardé avec succès dans OpenKM- Session: {}, UUID: {}, Taille: {} bytes",
+                    sessionId, uploadResult.getOpenkmUuid(), uploadResult.getFileSize());
+
+            return FileStorageResult.success(
+                    verificationFile.getId(),
+                    uploadResult.getOpenkmUuid(),
+                    uploadResult.getOpenkmPath(),
+                    uploadResult.getOriginalFilename()
+            );
+
+        } catch (Exception e) {
+            log.error("Erreur sauvegarde OpenKM pour session {}: {}", sessionId, e.getMessage(), e);
+            throw new IOException("Erreur sauvegarde OpenKM: " + e.getMessage(), e);
+        }
+    }
+
+    // Sauvegarde locale avec bytes cachés
+    private FileStorageResult saveFileLocallyWithCachedBytes(CompletedFileUpload originalFile, byte[] cachedBytes,
+                                                             String sessionId, FileType fileType, String subDirectory) throws IOException {
+        try {
+            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}",
+                    sessionId, fileType, subDirectory);
+
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + originalFile.getFilename();
+
+            Path directory = Paths.get(localBasePath, subDirectory);
+            Path filePath = directory.resolve(filename);
+
+            // Utiliser les bytes cachés au lieu de l'InputStream
+            Files.write(filePath, cachedBytes);
+
+            // Sauvegarder les métadonnées en PostgreSQL
+            VerificationFile verificationFile = new VerificationFile(
+                    sessionId,
+                    fileType,
+                    UUID.randomUUID().toString(),
+                    filePath.toString(),
+                    subDirectory
+            );
+
+            verificationFile.setOriginalFilename(originalFile.getFilename());
+            verificationFile.setContentType(originalFile.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
+            verificationFile.setFileSize((long) cachedBytes.length);
+
+            verificationFile = fileRepository.save(verificationFile);
+
+            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
+                    sessionId, filePath, cachedBytes.length);
+
+            return FileStorageResult.success(
+                    verificationFile.getId(),
+                    verificationFile.getOpenkmUuid(),
+                    filePath.toString(),
+                    originalFile.getFilename()
+            );
+
+        } catch (Exception e) {
+            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
+            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
+        }
+    }
+
+    // Bytes pour les chargements et l'extraction
+    private static class CachedBytesFileUpload implements CompletedFileUpload {
+        private final CompletedFileUpload original;
+        private final byte[] cachedBytes;
+
+        public CachedBytesFileUpload(CompletedFileUpload original, byte[] cachedBytes) {
+            this.original = original;
+            this.cachedBytes = cachedBytes;
+        }
+
+        @Override
+        public byte[] getBytes() throws IOException {
+            return cachedBytes;
+        }
+
+        @Override
+        public java.io.InputStream getInputStream() throws IOException {
+            return new java.io.ByteArrayInputStream(cachedBytes);
+        }
+
+        @Override
+        public String getFilename() {
+            return original.getFilename();
+        }
+
+        @Override
+        public java.util.Optional<io.micronaut.http.MediaType> getContentType() {
+            return original.getContentType();
+        }
+
+        public java.nio.ByteBuffer getByteBuffer() throws IOException {
+            return java.nio.ByteBuffer.wrap(cachedBytes);
+        }
+
+        public long getSize() {
+            return cachedBytes.length;
+        }
+
+        public long getDefinedSize() {
+            return cachedBytes.length;
+        }
+
+        public boolean isEmpty() {
+            return cachedBytes.length == 0;
+        }
+
+        public String getName() {
+            return original.getName();
+        }
+
+        public boolean isComplete() {
+            return true;
+        }
+
+        public void discard() {
+            original.discard();
+        }
+
+        public void transferTo(String location) throws IOException {
+            Files.write(Paths.get(location), cachedBytes);
+        }
+
+        public void transferTo(java.io.File dest) throws IOException {
+            Files.write(dest.toPath(), cachedBytes);
+        }
+
+        public void transferTo(java.nio.file.Path dest) throws IOException {
+            Files.write(dest, cachedBytes);
         }
     }
 
     // RÉCUPÉRATION DE FICHIERS POUR SCRIPTS PYTHON
-
     public String getFilePathForProcessing(String sessionId, FileType fileType) throws IOException {
         log.debug("Récupération chemin fichier pour traitement - Session: {}, Type: {}", sessionId, fileType);
 
@@ -82,11 +351,32 @@ public class FileStorageService {
         if (openKMEnabled) {
             return getOpenKMFileForProcessing(verificationFile);
         } else {
-            // Mode local - retourner directement le chemin
+            // Mode local - retourne  le chemin
             log.debug("Mode local - Retour du chemin: {}", verificationFile.getOpenkmPath());
-            return verificationFile.getOpenkmPath(); // En mode local, on stocke le chemin local ici
+            return verificationFile.getOpenkmPath(); // on stocke le chemin local ici
         }
     }
+
+    // NETTOYAGE ENRICHI
+    public void cleanupExpiredTempFiles() {
+        log.debug("Démarrage nettoyage fichiers temporaires expirés");
+
+        if (openKMEnabled) {
+            // Nettoyer les fichiers temporaires OpenKM
+            openKMService.cleanupExpiredTempFiles();
+
+            // Nettoyer les enregistrements de fichiers temporaires expirés
+            int deletedCount = fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
+            if (deletedCount > 0) {
+                log.info("Nettoyage: {} enregistrements de fichiers temporaires expirés supprimés", deletedCount);
+            }
+        }
+
+        //  Nettoyer les fichiers convertis expirés
+        pdfConversionService.cleanupConvertedFiles();
+    }
+
+    // MÉTHODES PRIVÉES
 
     private String getOpenKMFileForProcessing(VerificationFile verificationFile) throws IOException {
         log.debug("Récupération fichier OpenKM pour traitement - UUID: {}", verificationFile.getOpenkmUuid());
@@ -122,8 +412,6 @@ public class FileStorageService {
         log.info("Fichier temporaire créé avec succès: {}", tempResult.getTempFilePath());
         return tempResult.getTempFilePath();
     }
-
-    // SAUVEGARDE OPENKM
 
     private FileStorageResult saveFileToOpenKM(CompletedFileUpload file, String sessionId, FileType fileType) throws IOException {
         try {
@@ -173,8 +461,6 @@ public class FileStorageService {
         }
     }
 
-    // SAUVEGARDE LOCALE (Fallback)
-
     private FileStorageResult saveFileLocally(CompletedFileUpload file, String sessionId,
                                               FileType fileType, String subDirectory) throws IOException {
         try {
@@ -219,7 +505,7 @@ public class FileStorageService {
         }
     }
 
-    // NETTOYAGE
+    // MÉTHODES UTILITAIRES
 
     public boolean deleteFile(UUID fileId) {
         try {
@@ -232,9 +518,8 @@ public class FileStorageService {
             }
 
             if (openKMEnabled) {
-                // TODO: Implémenter la suppression OpenKM via API REST
-                // Pour le moment, on supprime juste l'enregistrement
-                log.debug("Suppression OpenKM non implémentée, suppression de l'enregistrement seulement");
+                // on supprime juste l'enregistrement
+                log.debug(" suppression de l'enregistrement ");
             } else {
                 // Suppression locale
                 try {
@@ -261,23 +546,6 @@ public class FileStorageService {
         }
     }
 
-    public void cleanupExpiredTempFiles() {
-        log.debug("Démarrage nettoyage fichiers temporaires expirés");
-
-        if (openKMEnabled) {
-            // Nettoyer les fichiers temporaires OpenKM
-            openKMService.cleanupExpiredTempFiles();
-
-            // Nettoyer les enregistrements de fichiers temporaires expirés
-            int deletedCount = fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
-            if (deletedCount > 0) {
-                log.info("Nettoyage: {} enregistrements de fichiers temporaires expirés supprimés", deletedCount);
-            }
-        }
-    }
-
-    // MÉTHODES UTILITAIRES
-
     private void createLocalDirectories() {
         try {
             Files.createDirectories(Paths.get(localBasePath, "identity_documents"));
@@ -298,7 +566,6 @@ public class FileStorageService {
     }
 
     // CLASSE DE RÉSULTAT
-
     public static class FileStorageResult {
         private final boolean success;
         private final UUID fileId;

@@ -281,6 +281,7 @@ public class VerificationResultService {
     /**
      * Convertit un résultat persisté vers un DTO pour la réponse
      */
+    @SuppressWarnings("unchecked")
     public VerificationResultDto convertToDto(VerificationResult result) {
         if (result == null) {
             log.warn("Tentative de conversion d'un résultat null");
@@ -325,7 +326,9 @@ public class VerificationResultService {
                     docData.setIssuingCountry((String) extractionData.get("issuingCountry"));
                 }
                 if (extractionData.containsKey("extractedFields")) {
-                    docData.setExtractedFields((Map<String, Object>) extractionData.get("extractedFields"));
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> extractedFields = (Map<String, Object>) extractionData.get("extractedFields");
+                    docData.setExtractedFields(extractedFields);
                 }
 
                 dto.setDocumentData(docData);

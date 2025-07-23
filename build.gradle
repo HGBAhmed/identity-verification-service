@@ -19,7 +19,7 @@ dependencies {
     annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
     annotationProcessor("io.micronaut.validation:micronaut-validation-processor")
 
-    // NOUVEAU : Annotation processors pour Security
+    // Annotation processors pour Security
     annotationProcessor("io.micronaut.security:micronaut-security-annotations")
 
     // Micronaut Core
@@ -44,15 +44,15 @@ dependencies {
     implementation("io.micronaut.validation:micronaut-validation")
     implementation("jakarta.validation:jakarta.validation-api")
 
-    // NOUVEAU : Security & Keycloak
+    // Security & Keycloak
     implementation("io.micronaut.security:micronaut-security")
     implementation("io.micronaut.security:micronaut-security-oauth2")
     implementation("io.micronaut.security:micronaut-security-jwt")
 
-    // NOUVEAU : Support Keycloak
+    // Support Keycloak
     implementation("io.micronaut.security:micronaut-security-annotations")
 
-    // NOUVEAU : Client HTTP pour communications avec Keycloak
+    //  Client HTTP pour communications avec Keycloak
     implementation("io.micronaut:micronaut-http-client")
 
     // Runtime
@@ -68,8 +68,12 @@ dependencies {
     testImplementation("io.micronaut:micronaut-http-client")
     testImplementation("io.micronaut.test:micronaut-test-junit5")
 
-    // NOUVEAU : Tests Security
+    // Tests Security
     testImplementation("io.micronaut.security:micronaut-security-jwt")
+
+    // Conversion PDF vers Image
+    implementation("org.apache.pdfbox:pdfbox:3.0.1")
+    implementation("org.apache.pdfbox:pdfbox-tools:3.0.1")
 }
 
 application {

@@ -47,6 +47,7 @@ public interface VerificationResultRepository extends JpaRepository<Verification
     int deleteByCreatedAtBefore(LocalDateTime cutoffDate);
 
     //parce que micronaut ne le fait pas auto
+    @Override
     VerificationResult update(VerificationResult result);
 
     // Verifier si un utilisateur a deja fait des verifications
