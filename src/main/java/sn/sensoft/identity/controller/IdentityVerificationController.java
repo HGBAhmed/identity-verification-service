@@ -17,6 +17,12 @@ import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.rules.SecurityRule;
 import jakarta.inject.Inject;
 
+import io.micronaut.http.server.types.files.StreamedFile;
+import sn.sensoft.identity.dto.FileInfoDto;
+import sn.sensoft.identity.service.FileManagementService;
+import java.util.List;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +43,9 @@ public class IdentityVerificationController {
 
     @Inject
     private FileValidator fileValidator;
+
+    @Inject
+    private FileManagementService fileManagementService;
 
 
     /**
@@ -155,36 +164,6 @@ public class IdentityVerificationController {
             );
         }
     }
-
-//    /**
-//     * Upload et extraction
-//     */
-//    @Post(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA)
-//    @Secured({"VERIFICATION_USER", "ADMIN"})
-//    @Deprecated
-//    public HttpResponse<DocumentUploadResponse> uploadDocument(
-//            @Part("identityDocument") CompletedFileUpload identityDocument,
-//            @Part("userIdentifier") String userIdentifier) {
-//
-//        log.info("Utilisation endpoint déprécié /document pour utilisateur: {}", userIdentifier);
-//        return processDocumentUpload(identityDocument, userIdentifier, null); // Pas de validation de type
-//    }
-
-//    /**
-//     * Upload complet
-//     */
-//    @Post(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA)
-//    @Secured({"VERIFICATION_USER", "ADMIN"})
-//    @Deprecated
-//    public HttpResponse<VerificationResultDto> uploadAndVerify(
-//            @Part("identityDocument") CompletedFileUpload identityDocument,
-//            @Part("userPhoto") CompletedFileUpload userPhoto,
-//            @Part("userIdentifier") String userIdentifier) {
-//
-//        log.info("Utilisation endpoint déprécié /upload pour utilisateur: {}", userIdentifier);
-//        return processCompleteVerification(identityDocument, userPhoto, userIdentifier, null);
-//    }
-
 
     /**
      * Comparaison avec photo
@@ -364,7 +343,7 @@ public class IdentityVerificationController {
     }
 
     @Get("/history/{userIdentifier}")
-    @Secured({"ADMIN", "VERIFICATION_USER", "VIEWER"})
+    @Secured("ADMIN")
     public HttpResponse<java.util.List<VerificationResultDto>> getUserHistory(@PathVariable String userIdentifier) {
         try {
             log.debug("Recherche historique pour utilisateur: {}", userIdentifier);
@@ -403,20 +382,6 @@ public class IdentityVerificationController {
         }
     }
 
-    @Get("/stats/week")
-    @Secured("ADMIN")
-    public HttpResponse<VerificationResultService.VerificationStats> getWeekStats() {
-        try {
-            log.debug("Récupération statistiques de la semaine");
-            var stats = resultService.getWeekStats();
-            log.info("Statistiques de la semaine récupérées: {} vérifications", stats.getTotalVerifications());
-            return HttpResponse.ok(stats);
-        } catch (Exception e) {
-            log.error("Erreur récupération statistiques de la semaine: {}", e.getMessage(), e);
-            return HttpResponse.serverError();
-        }
-    }
-
     @Get("/health")
     @Secured(SecurityRule.IS_ANONYMOUS)
     public HttpResponse<String> health() {
@@ -424,29 +389,122 @@ public class IdentityVerificationController {
         return HttpResponse.ok("Identity Verification Service is running");
     }
 
-//    @Get("/sessions/count")
-//    @Secured("ADMIN")
-//    public HttpResponse<String> getSessionsCount() {
-//        int count = sessionService.getActiveSessionsCount();
-//        log.info("Nombre de sessions actives: {}", count);
-//        return HttpResponse.ok("Sessions actives: " + count);
-//    }
+    /**
+     * Télécharger un fichier par son ID
+     */
+    @Get("/files/{fileId}/download")
+    @Secured({"ADMIN", "VERIFICATION_USER"})
+    public HttpResponse<StreamedFile> downloadFile(@PathVariable UUID fileId) {
+        try {
+            log.debug("Demande téléchargement fichier: {}", fileId);
 
-//    @Get("/status/storage")
-//    @Secured("ADMIN")
-//    public HttpResponse<java.util.Map<String, Object>> getStorageStatus() {
-//        try {
-//            log.debug("Récupération statut de stockage");
-//            var status = new java.util.HashMap<String, Object>();
-//            status.put("openKMEnabled", true);
-//            status.put("activeSessionsCount", sessionService.getActiveSessionsCount());
-//            status.put("todayStats", resultService.getTodayStats());
-//
-//            log.info("Statut de stockage récupéré avec succès");
-//            return HttpResponse.ok(status);
-//        } catch (Exception e) {
-//            log.error("Erreur récupération statut de stockage: {}", e.getMessage(), e);
-//            return HttpResponse.serverError();
-//        }
-//    }
+            FileManagementService.FileDownloadResult result = fileManagementService.downloadFile(fileId);
+
+            if (!result.isSuccess()) {
+                log.warn("Échec téléchargement fichier {}: {}", fileId, result.getError());
+                return HttpResponse.notFound();
+            }
+
+            log.info("Téléchargement fichier réussi: {} -> {}", fileId, result.getOriginalFilename());
+
+            return HttpResponse.ok(result.getStreamedFile())
+                    .header("Content-Disposition", "attachment; filename=\"" + result.getOriginalFilename() + "\"")
+                    .contentType(MediaType.of(result.getContentType()));
+
+        } catch (Exception e) {
+            log.error("Erreur téléchargement fichier {}: {}", fileId, e.getMessage(), e);
+            return HttpResponse.serverError();
+        }
+    }
+
+    /**
+     * Lister les fichiers d'une session
+     */
+    @Get("/files/session/{sessionId}")
+    @Secured("ADMIN")
+    public HttpResponse<List<FileInfoDto>> getSessionFiles(@PathVariable String sessionId) {
+        try {
+            log.debug("Récupération fichiers pour session: {}", sessionId);
+
+            List<FileInfoDto> files = fileManagementService.getSessionFiles(sessionId);
+
+            log.info("Fichiers session {} récupérés: {} fichiers", sessionId, files.size());
+            return HttpResponse.ok(files);
+
+        } catch (Exception e) {
+            log.error("Erreur récupération fichiers session {}: {}", sessionId, e.getMessage(), e);
+            return HttpResponse.serverError();
+        }
+    }
+
+    /**
+     * Lister les fichiers d'un résultat
+     */
+    @Get("/files/result/{requestId}")
+    @Secured("ADMIN")
+    public HttpResponse<List<FileInfoDto>> getResultFiles(@PathVariable String requestId) {
+        try {
+            log.debug("Récupération fichiers pour résultat: {}", requestId);
+
+            List<FileInfoDto> files = fileManagementService.getResultFiles(requestId);
+
+            log.info("Fichiers résultat {} récupérés: {} fichiers", requestId, files.size());
+            return HttpResponse.ok(files);
+
+        } catch (Exception e) {
+            log.error("Erreur récupération fichiers résultat {}: {}", requestId, e.getMessage(), e);
+            return HttpResponse.serverError();
+        }
+    }
+
+    /**
+     * Obtenir les métadonnées d'un fichier
+     */
+    @Get("/files/{fileId}/info")
+    @Secured("ADMIN")
+    public HttpResponse<FileInfoDto> getFileInfo(@PathVariable UUID fileId) {
+        try {
+            log.debug("Récupération info fichier: {}", fileId);
+
+            FileInfoDto fileInfo = fileManagementService.getFileInfo(fileId);
+
+            if (fileInfo == null) {
+                log.warn("Fichier non trouvé: {}", fileId);
+                return HttpResponse.notFound();
+            }
+
+            log.debug("Info fichier {} récupérée", fileId);
+            return HttpResponse.ok(fileInfo);
+
+        } catch (Exception e) {
+            log.error("Erreur récupération info fichier {}: {}", fileId, e.getMessage(), e);
+            return HttpResponse.serverError();
+        }
+    }
+
+    /**
+     * Supprimer un fichier
+     */
+    @Delete("/files/{fileId}")
+    @Secured("ADMIN")
+    public HttpResponse<String> deleteFile(@PathVariable UUID fileId) {
+        try {
+            log.debug("Demande suppression fichier: {}", fileId);
+
+            boolean deleted = fileManagementService.deleteFile(fileId);
+
+            if (!deleted) {
+                log.warn("Fichier non trouvé pour suppression: {}", fileId);
+                return HttpResponse.notFound("Fichier non trouvé");
+            }
+
+            log.info("Fichier supprimé avec succès: {}", fileId);
+            return HttpResponse.ok("Fichier supprimé avec succès");
+
+        } catch (Exception e) {
+            log.error("Erreur suppression fichier {}: {}", fileId, e.getMessage(), e);
+            return HttpResponse.serverError("Erreur lors de la suppression");
+        }
+    }
+
 }

@@ -39,7 +39,15 @@ public interface VerificationFileRepository extends JpaRepository<VerificationFi
     @Query("SELECT COALESCE(SUM(f.fileSize), 0) FROM VerificationFile f WHERE f.fileType = :fileType")
     Optional<Long> sumFileSizeByFileType(FileType fileType);
 
+    // pour les téléchargements
+    @Query("SELECT f FROM VerificationFile f WHERE f.id IN :fileIds")
+    List<VerificationFile> findByIdIn(List<UUID> fileIds);
+
+    @Query("SELECT f.fileType, COUNT(f) FROM VerificationFile f GROUP BY f.fileType")
+    List<Object[]> getFileTypeStatistics();
+
     // à ajouter parce que micronaut ne le fait pas auto
     @Override
     VerificationFile update(VerificationFile file);
+
 }

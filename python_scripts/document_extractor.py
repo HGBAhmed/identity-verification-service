@@ -17,6 +17,24 @@ try:
 except ImportError:
     EASYOCR_AVAILABLE = False
 
+# Cache global EasyOCR (réutilisé entre les appels)
+_EASYOCR_READER_CACHE = None
+
+def get_easyocr_reader():
+    """Récupère le reader EasyOCR global (lazy loading)"""
+    global _EASYOCR_READER_CACHE
+
+    if _EASYOCR_READER_CACHE is None:
+        if EASYOCR_AVAILABLE:
+            print("Initialisation EasyOCR Reader")
+            import easyocr
+            _EASYOCR_READER_CACHE = easyocr.Reader(['en', 'fr'], gpu=False)
+            print("EasyOCR Reader initialisé et mis en cache")
+        else:
+            print("EasyOCR non disponible")
+            return None
+
+    return _EASYOCR_READER_CACHE
 def normalize_text(text):
     """Normalise le texte"""
     text = unicodedata.normalize('NFD', text)
@@ -451,7 +469,7 @@ def detect_document_type_and_side(image_path: str) -> Tuple[str, str]:
         return 'PASSPORT', 'SINGLE'
 
     try:
-        reader = easyocr.Reader(['en', 'fr'], gpu=False)
+        reader = get_easyocr_reader()
         results = reader.readtext(image_path)
         text = ' '.join([r[1] for r in results if r[2] > 0.3])
         text_norm = normalize_text(text)
@@ -1021,7 +1039,7 @@ def extract_card_data(image_path: str, doc_type: str, side: str) -> Dict:
         return {'status': 'error', 'error': 'EasyOCR non disponible'}
 
     try:
-        reader = easyocr.Reader(['en', 'fr'], gpu=False)
+        reader = get_easyocr_reader()
         results = reader.readtext(image_path)
 
         # Texte pour EasyOCR
@@ -1061,7 +1079,7 @@ def extract_passport(image_path: str) -> Dict:
         # Extraction OCR en parallèle
         text_combined = ""
         if EASYOCR_AVAILABLE:
-            reader = easyocr.Reader(['en', 'fr'], gpu=False)
+            reader = get_easyocr_reader()
             results = reader.readtext(image_path)
             text_blocks = [r[1] for r in results if r[2] > 0.4]
             text_combined = ' '.join(text_blocks)
