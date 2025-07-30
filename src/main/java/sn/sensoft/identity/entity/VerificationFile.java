@@ -24,6 +24,9 @@ public class VerificationFile {
     @Column(name = "file_type", nullable = false)
     private FileType fileType;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     // Références OpenKM
     @Column(name = "openkm_uuid", nullable = false)
     private String openkmUuid;
@@ -82,6 +85,18 @@ public class VerificationFile {
     public void clearTempFile() {
         this.tempPath = null;
         this.tempExpiresAt = null;
+    }
+
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
+
+    public void markAsDeleted() {
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    public void restore() {
+        this.deletedAt = null;
     }
 
     // Getters & Setters
@@ -180,5 +195,8 @@ public class VerificationFile {
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
     }
+
+    public LocalDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
 
 }

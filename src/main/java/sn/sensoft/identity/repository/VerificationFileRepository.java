@@ -46,6 +46,13 @@ public interface VerificationFileRepository extends JpaRepository<VerificationFi
     @Query("SELECT f.fileType, COUNT(f) FROM VerificationFile f GROUP BY f.fileType")
     List<Object[]> getFileTypeStatistics();
 
+    //methode pour soft delete
+    @Query("SELECT f FROM VerificationFile f WHERE f.deletedAt IS NOT NULL")
+    List<VerificationFile> findDeletedFiles();
+
+    @Query("SELECT f FROM VerificationFile f WHERE f.deletedAt IS NOT NULL AND f.deletedAt < :cutoffDate")
+    List<VerificationFile> findFilesDeletedBefore(LocalDateTime cutoffDate);
+
     // à ajouter parce que micronaut ne le fait pas auto
     @Override
     VerificationFile update(VerificationFile file);

@@ -1,6 +1,5 @@
 package sn.sensoft.identity.service;
 
-import io.micronaut.http.MediaType;
 import io.micronaut.http.server.types.files.StreamedFile;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -20,6 +19,8 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import io.micronaut.http.MediaType;
 
 @Singleton
 public class FileManagementService {
@@ -126,6 +127,67 @@ public class FileManagementService {
         }
 
         return convertToDto(file);
+    }
+
+    /**
+     * Restaure un fichier supprimé (soft delete)
+     */
+    public boolean restoreFile(UUID fileId) {
+        try {
+            log.debug("Restauration fichier: {}", fileId);
+
+            VerificationFile file = fileRepository.findById(fileId).orElse(null);
+            if (file == null) {
+                log.warn("Fichier non trouvé pour restauration: {}", fileId);
+                return false;
+            }
+
+            if (file.getDeletedAt() == null) {
+                log.warn("Fichier non supprimé, impossible de restaurer: {}", fileId);
+                return false;
+            }
+
+            file.setDeletedAt(null); // Restaurer
+            fileRepository.update(file);
+
+            log.info("Fichier restauré avec succès: {}", fileId);
+            return true;
+
+        } catch (Exception e) {
+            log.error("Erreur restauration fichier {}: {}", fileId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Suppression physique définitive d'un fichier
+     */
+    public boolean permanentDeleteFile(UUID fileId) {
+        try {
+            log.debug("Suppression physique définitive fichier: {}", fileId);
+            return fileStorageService.permanentDeleteFile(fileId);
+        } catch (Exception e) {
+            log.error("Erreur suppression définitive fichier {}: {}", fileId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Récupère la liste des fichiers supprimés
+     */
+    public List<FileInfoDto> getDeletedFiles() {
+        try {
+            log.debug("Récupération fichiers supprimés");
+
+            List<VerificationFile> deletedFiles = fileRepository.findDeletedFiles();
+
+            return deletedFiles.stream()
+                    .map(this::convertToDto)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Erreur récupération fichiers supprimés: {}", e.getMessage(), e);
+            return List.of();
+        }
     }
 
     /**

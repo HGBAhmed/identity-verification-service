@@ -61,19 +61,19 @@ public class IdentityVerificationController {
         return processDocumentUpload(passportDocument, userIdentifier, "PASSPORT");
     }
 
-    /**
-     * Vérification complète PASSEPORT
-     */
-    @Post(value = "/passport/complete", consumes = MediaType.MULTIPART_FORM_DATA)
-    @Secured({"VERIFICATION_USER", "ADMIN"})
-    public HttpResponse<VerificationResultDto> verifyPassport(
-            @Part("passportDocument") CompletedFileUpload passportDocument,
-            @Part("userPhoto") CompletedFileUpload userPhoto,
-            @Part("userIdentifier") String userIdentifier) {
-
-        log.info("Début vérification complète passeport pour utilisateur: {}", userIdentifier);
-        return processCompleteVerification(passportDocument, userPhoto, userIdentifier, "PASSPORT");
-    }
+//    /**
+//     * Vérification complète PASSEPORT
+//     */
+//    @Post(value = "/passport/complete", consumes = MediaType.MULTIPART_FORM_DATA)
+//    @Secured({"VERIFICATION_USER", "ADMIN"})
+//    public HttpResponse<VerificationResultDto> verifyPassport(
+//            @Part("passportDocument") CompletedFileUpload passportDocument,
+//            @Part("userPhoto") CompletedFileUpload userPhoto,
+//            @Part("userIdentifier") String userIdentifier) {
+//
+//        log.info("Début vérification complète passeport pour utilisateur: {}", userIdentifier);
+//        return processCompleteVerification(passportDocument, userPhoto, userIdentifier, "PASSPORT");
+//    }
 
     /**
      * Upload et extraction d'une CARTE D'IDENTITÉ
@@ -88,19 +88,19 @@ public class IdentityVerificationController {
         return processDocumentUpload(idCardDocument, userIdentifier, "ID_CARD");
     }
 
-    /**
-     * Vérification complète CARTE D'IDENTITÉ
-     */
-    @Post(value = "/id-card/complete", consumes = MediaType.MULTIPART_FORM_DATA)
-    @Secured({"VERIFICATION_USER", "ADMIN"})
-    public HttpResponse<VerificationResultDto> verifyIdCard(
-            @Part("idCardDocument") CompletedFileUpload idCardDocument,
-            @Part("userPhoto") CompletedFileUpload userPhoto,
-            @Part("userIdentifier") String userIdentifier) {
-
-        log.info("Début vérification complète carte d'identité pour utilisateur: {}", userIdentifier);
-        return processCompleteVerification(idCardDocument, userPhoto, userIdentifier, "ID_CARD");
-    }
+//    /**
+//     * Vérification complète CARTE D'IDENTITÉ
+//     */
+//    @Post(value = "/id-card/complete", consumes = MediaType.MULTIPART_FORM_DATA)
+//    @Secured({"VERIFICATION_USER", "ADMIN"})
+//    public HttpResponse<VerificationResultDto> verifyIdCard(
+//            @Part("idCardDocument") CompletedFileUpload idCardDocument,
+//            @Part("userPhoto") CompletedFileUpload userPhoto,
+//            @Part("userIdentifier") String userIdentifier) {
+//
+//        log.info("Début vérification complète carte d'identité pour utilisateur: {}", userIdentifier);
+//        return processCompleteVerification(idCardDocument, userPhoto, userIdentifier, "ID_CARD");
+//    }
 
     /**
      * Upload RECTO + VERSO d'une carte d'identité
@@ -437,25 +437,25 @@ public class IdentityVerificationController {
         }
     }
 
-    /**
-     * Lister les fichiers d'un résultat
-     */
-    @Get("/files/result/{requestId}")
-    @Secured("ADMIN")
-    public HttpResponse<List<FileInfoDto>> getResultFiles(@PathVariable String requestId) {
-        try {
-            log.debug("Récupération fichiers pour résultat: {}", requestId);
-
-            List<FileInfoDto> files = fileManagementService.getResultFiles(requestId);
-
-            log.info("Fichiers résultat {} récupérés: {} fichiers", requestId, files.size());
-            return HttpResponse.ok(files);
-
-        } catch (Exception e) {
-            log.error("Erreur récupération fichiers résultat {}: {}", requestId, e.getMessage(), e);
-            return HttpResponse.serverError();
-        }
-    }
+//    /**
+//     * Lister les fichiers d'un résultat
+//     */
+//    @Get("/files/result/{requestId}")
+//    @Secured("ADMIN")
+//    public HttpResponse<List<FileInfoDto>> getResultFiles(@PathVariable String requestId) {
+//        try {
+//            log.debug("Récupération fichiers pour résultat: {}", requestId);
+//
+//            List<FileInfoDto> files = fileManagementService.getResultFiles(requestId);
+//
+//            log.info("Fichiers résultat {} récupérés: {} fichiers", requestId, files.size());
+//            return HttpResponse.ok(files);
+//
+//        } catch (Exception e) {
+//            log.error("Erreur récupération fichiers résultat {}: {}", requestId, e.getMessage(), e);
+//            return HttpResponse.serverError();
+//        }
+//    }
 
     /**
      * Obtenir les métadonnées d'un fichier
@@ -504,6 +504,57 @@ public class IdentityVerificationController {
         } catch (Exception e) {
             log.error("Erreur suppression fichier {}: {}", fileId, e.getMessage(), e);
             return HttpResponse.serverError("Erreur lors de la suppression");
+        }
+    }
+
+    /**
+     * Restaurer un fichier supprimé
+     */
+    @Post("/files/{fileId}/restore")
+    @Secured("ADMIN")
+    public HttpResponse<String> restoreFile(@PathVariable UUID fileId) {
+        try {
+            boolean restored = fileManagementService.restoreFile(fileId);
+            if (!restored) {
+                return HttpResponse.notFound("Fichier non trouvé ou non supprimé");
+            }
+            return HttpResponse.ok("Fichier restauré avec succès");
+        } catch (Exception e) {
+            log.error("Erreur restauration fichier {}: {}", fileId, e.getMessage(), e);
+            return HttpResponse.serverError("Erreur lors de la restauration");
+        }
+    }
+
+    /**
+     * Suppression définitive
+     */
+    @Delete("/files/{fileId}/permanent")
+    @Secured("ADMIN")
+    public HttpResponse<String> permanentDeleteFile(@PathVariable UUID fileId) {
+        try {
+            boolean deleted = fileManagementService.permanentDeleteFile(fileId);
+            if (!deleted) {
+                return HttpResponse.notFound("Fichier non trouvé");
+            }
+            return HttpResponse.ok("Fichier supprimé définitivement");
+        } catch (Exception e) {
+            log.error("Erreur suppression définitive fichier {}: {}", fileId, e.getMessage(), e);
+            return HttpResponse.serverError("Erreur lors de la suppression définitive");
+        }
+    }
+
+    /**
+     * Lister les fichiers supprimés
+     */
+    @Get("/files/deleted")
+    @Secured("ADMIN")
+    public HttpResponse<List<FileInfoDto>> getDeletedFiles() {
+        try {
+            List<FileInfoDto> files = fileManagementService.getDeletedFiles();
+            return HttpResponse.ok(files);
+        } catch (Exception e) {
+            log.error("Erreur récupération fichiers supprimés: {}", e.getMessage(), e);
+            return HttpResponse.serverError();
         }
     }
 

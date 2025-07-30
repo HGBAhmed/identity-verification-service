@@ -9,9 +9,9 @@
         <appender-ref ref="STDOUT" />
     </root>
 
-    <!-- : INFO au lieu de TRACE -->
+    <!-- : INFO  -->
     <logger name="io.micronaut.http.client" level="INFO" />
 
-    <!--  requêtes HTTP sans le contenu binaire -->
+    <!--  requêtes HTTP sans contenu binaire -->
     <logger name="io.micronaut.http.client.netty" level="DEBUG" />
 </configuration>

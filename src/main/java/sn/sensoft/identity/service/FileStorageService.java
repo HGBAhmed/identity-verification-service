@@ -509,59 +509,63 @@ public class FileStorageService {
 
     public boolean deleteFile(UUID fileId) {
         try {
-            log.debug("Suppression fichier: {}", fileId);
+            log.debug("Suppression logique fichier: {}", fileId);
+
+            VerificationFile verificationFile = fileRepository.findById(fileId).orElse(null);
+            if (verificationFile == null || verificationFile.isDeleted()) {
+                log.warn("Fichier non trouvé ou déjà supprimé: {}", fileId);
+                return false;
+            }
+
+            // Suppression LOGIQUE seulement
+            verificationFile.markAsDeleted();
+            fileRepository.update(verificationFile);
+
+            log.info("Fichier marqué comme supprimé (soft delete): {}", fileId);
+            return true;
+
+        } catch (Exception e) {
+            log.error("Erreur suppression logique fichier {}: {}", fileId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+
+    //Suppression physique définitive
+
+    public boolean permanentDeleteFile(UUID fileId) {
+        try {
+            log.debug("Suppression physique définitive fichier: {}", fileId);
 
             VerificationFile verificationFile = fileRepository.findById(fileId).orElse(null);
             if (verificationFile == null) {
-                log.warn("Fichier non trouvé pour suppression: {}", fileId);
+                log.warn("Fichier non trouvé pour suppression définitive: {}", fileId);
                 return false;
             }
 
             boolean physicalDeletionSuccess = false;
 
             if (openKMEnabled) {
-                // Suppression dans OpenKM
-                log.debug("Suppression fichier OpenKM - UUID: {}, Path: {}",
-                        verificationFile.getOpenkmUuid(), verificationFile.getOpenkmPath());
-
                 physicalDeletionSuccess = openKMService.deleteDocument(
                         verificationFile.getOpenkmUuid(),
                         verificationFile.getOpenkmPath()
                 );
-
-                if (!physicalDeletionSuccess) {
-                    log.warn("Échec suppression physique OpenKM, mais suppression enregistrement maintenue");
-                }
             } else {
-                // Suppression locale
                 try {
                     physicalDeletionSuccess = Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
-                    log.debug("Fichier local supprimé: {} - Succès: {}",
-                            verificationFile.getOpenkmPath(), physicalDeletionSuccess);
                 } catch (IOException e) {
-                    log.error("Erreur suppression fichier local {}: {}",
-                            verificationFile.getOpenkmPath(), e.getMessage());
+                    log.error("Erreur suppression fichier local {}: {}", verificationFile.getOpenkmPath(), e.getMessage());
                 }
-            }
-
-            // Supprimer le fichier temporaire s'il existe
-            if (verificationFile.getTempPath() != null) {
-                openKMService.deleteTempFile(verificationFile.getTempPath());
             }
 
             // Supprimer l'enregistrement en base
             fileRepository.deleteById(fileId);
 
-            if (physicalDeletionSuccess) {
-                log.info("Fichier supprimé avec succès (physique + base): {}", fileId);
-            } else {
-                log.warn("Fichier supprimé en base uniquement : {}", fileId);
-            }
-
+            log.info("Fichier supprimé définitivement: {}", fileId);
             return true;
 
         } catch (Exception e) {
-            log.error("Erreur suppression fichier {}: {}", fileId, e.getMessage(), e);
+            log.error("Erreur suppression définitive fichier {}: {}", fileId, e.getMessage(), e);
             return false;
         }
     }
