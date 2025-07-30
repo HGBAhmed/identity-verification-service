@@ -517,16 +517,30 @@ public class FileStorageService {
                 return false;
             }
 
+            boolean physicalDeletionSuccess = false;
+
             if (openKMEnabled) {
-                // on supprime juste l'enregistrement
-                log.debug(" suppression de l'enregistrement ");
+                // Suppression dans OpenKM
+                log.debug("Suppression fichier OpenKM - UUID: {}, Path: {}",
+                        verificationFile.getOpenkmUuid(), verificationFile.getOpenkmPath());
+
+                physicalDeletionSuccess = openKMService.deleteDocument(
+                        verificationFile.getOpenkmUuid(),
+                        verificationFile.getOpenkmPath()
+                );
+
+                if (!physicalDeletionSuccess) {
+                    log.warn("Échec suppression physique OpenKM, mais suppression enregistrement maintenue");
+                }
             } else {
                 // Suppression locale
                 try {
-                    boolean deleted = Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
-                    log.debug("Fichier local supprimé: {} - Succès: {}", verificationFile.getOpenkmPath(), deleted);
+                    physicalDeletionSuccess = Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
+                    log.debug("Fichier local supprimé: {} - Succès: {}",
+                            verificationFile.getOpenkmPath(), physicalDeletionSuccess);
                 } catch (IOException e) {
-                    log.error("Erreur suppression fichier local {}: {}", verificationFile.getOpenkmPath(), e.getMessage());
+                    log.error("Erreur suppression fichier local {}: {}",
+                            verificationFile.getOpenkmPath(), e.getMessage());
                 }
             }
 
@@ -535,9 +549,15 @@ public class FileStorageService {
                 openKMService.deleteTempFile(verificationFile.getTempPath());
             }
 
-            // Supprimer l'enregistrement
+            // Supprimer l'enregistrement en base
             fileRepository.deleteById(fileId);
-            log.info("Fichier supprimé avec succès: {}", fileId);
+
+            if (physicalDeletionSuccess) {
+                log.info("Fichier supprimé avec succès (physique + base): {}", fileId);
+            } else {
+                log.warn("Fichier supprimé en base uniquement : {}", fileId);
+            }
+
             return true;
 
         } catch (Exception e) {

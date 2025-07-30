@@ -27,6 +27,11 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+
+import io.micronaut.http.client.multipart.MultipartBody;
+
 @Singleton
 public class OpenKMService {
 
@@ -178,6 +183,136 @@ public class OpenKMService {
             return new OpenKMUploadResult(
                     false, null, null, null, null, null, 0L, errorMsg
             );
+        }
+    }
+
+
+    // DELETE METHODS
+
+    /**
+     * Supprime un document dans OpenKM
+     */
+    public boolean deleteDocument(String openkmUuid, String openkmPath) {
+        if (!enabled) {
+            log.warn("OpenKM désactivé - impossible de supprimer le document");
+            return false;
+        }
+
+        try {
+            log.debug("Suppression document OpenKM - UUID: {}, Path: {}", openkmUuid, openkmPath);
+
+            String auth = Base64.getEncoder().encodeToString((username + ":" + password).getBytes());
+
+            // d'abord par path
+            if (openkmPath != null && !openkmPath.isEmpty()) {
+                // POST avec form data
+                String deleteUrl = baseUrl + "/services/rest/document/delete";
+
+                MultipartBody.Builder builder = MultipartBody.builder()
+                        .addPart("docId", openkmPath);
+
+                MutableHttpRequest<MultipartBody> request = HttpRequest.POST(deleteUrl, builder.build())
+                        .header("Authorization", "Basic " + auth)
+                        .contentType(MediaType.MULTIPART_FORM_DATA_TYPE);
+
+                log.debug("Suppression par path (POST): {} - Path: {}", deleteUrl, openkmPath);
+
+                try {
+                    HttpResponse<String> response = httpClient.toBlocking().exchange(request, String.class);
+
+                    if (response.getStatus().getCode() >= 200 && response.getStatus().getCode() < 300) {
+                        log.info("Document supprimé avec succès dans OpenKM: {}", openkmPath);
+                        return true;
+                    } else {
+                        log.warn("Échec suppression par path (POST) - Status: {}, Response: {}",
+                                response.getStatus(), response.body());
+                    }
+                } catch (Exception e) {
+                    log.warn("Erreur suppression POST: {}", e.getMessage());
+                }
+
+                //  DELETE avec query param (fallback)
+                try {
+                    String encodedPath = URLEncoder.encode(openkmPath, StandardCharsets.UTF_8);
+                    String deleteUrlGet = baseUrl + "/services/rest/document/delete?docId=" + encodedPath;
+
+                    MutableHttpRequest<Object> requestGet = HttpRequest.DELETE(deleteUrlGet)
+                            .header("Authorization", "Basic " + auth);
+
+                    log.debug("Suppression par path (DELETE): {}", deleteUrlGet);
+
+                    HttpResponse<String> responseGet = httpClient.toBlocking().exchange(requestGet, String.class);
+
+                    if (responseGet.getStatus().getCode() >= 200 && responseGet.getStatus().getCode() < 300) {
+                        log.info("Document supprimé avec succès dans OpenKM (DELETE): {}", openkmPath);
+                        return true;
+                    } else {
+                        log.warn("Échec suppression par path (DELETE) - Status: {}, Response: {}",
+                                responseGet.getStatus(), responseGet.body());
+                    }
+                } catch (Exception e) {
+                    log.warn("Erreur suppression DELETE: {}", e.getMessage());
+                }
+            }
+
+            // Fallback: essayer par UUID si path échoue
+            if (openkmUuid != null && !openkmUuid.isEmpty() && !openkmUuid.startsWith("path:")) {
+                // Version 1: POST avec form data
+                String deleteUrl = baseUrl + "/services/rest/document/delete";
+
+                MultipartBody.Builder builder = MultipartBody.builder()
+                        .addPart("docId", openkmUuid);
+
+                MutableHttpRequest<MultipartBody> request = HttpRequest.POST(deleteUrl, builder.build())
+                        .header("Authorization", "Basic " + auth)
+                        .contentType(MediaType.MULTIPART_FORM_DATA_TYPE);
+
+                log.debug("Suppression par UUID (POST): {} - UUID: {}", deleteUrl, openkmUuid);
+
+                try {
+                    HttpResponse<String> response = httpClient.toBlocking().exchange(request, String.class);
+
+                    if (response.getStatus().getCode() >= 200 && response.getStatus().getCode() < 300) {
+                        log.info("Document supprimé avec succès dans OpenKM par UUID: {}", openkmUuid);
+                        return true;
+                    } else {
+                        log.warn("Échec suppression par UUID (POST) - Status: {}, Response: {}",
+                                response.getStatus(), response.body());
+                    }
+                } catch (Exception e) {
+                    log.warn("Erreur suppression UUID POST: {}", e.getMessage());
+                }
+
+                //  DELETE avec query param (fallback)
+                try {
+                    String deleteUrlGet = baseUrl + "/services/rest/document/delete?docId=" + openkmUuid;
+
+                    MutableHttpRequest<Object> requestGet = HttpRequest.DELETE(deleteUrlGet)
+                            .header("Authorization", "Basic " + auth);
+
+                    log.debug("Suppression par UUID (DELETE): {}", deleteUrlGet);
+
+                    HttpResponse<String> responseGet = httpClient.toBlocking().exchange(requestGet, String.class);
+
+                    if (responseGet.getStatus().getCode() >= 200 && responseGet.getStatus().getCode() < 300) {
+                        log.info("Document supprimé avec succès dans OpenKM par UUID (DELETE): {}", openkmUuid);
+                        return true;
+                    } else {
+                        log.warn("Échec suppression par UUID (DELETE) - Status: {}, Response: {}",
+                                responseGet.getStatus(), responseGet.body());
+                    }
+                } catch (Exception e) {
+                    log.warn("Erreur suppression UUID DELETE: {}", e.getMessage());
+                }
+            }
+
+            log.error("Impossible de supprimer le document - UUID: {}, Path: {}", openkmUuid, openkmPath);
+            return false;
+
+        } catch (Exception e) {
+            log.error("Erreur suppression document OpenKM - UUID: {}, Path: {}: {}",
+                    openkmUuid, openkmPath, e.getMessage(), e);
+            return false;
         }
     }
 
