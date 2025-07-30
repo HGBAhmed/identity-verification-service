@@ -17,7 +17,7 @@ try:
 except ImportError:
     EASYOCR_AVAILABLE = False
 
-# Cache global EasyOCR (réutilisé entre les appels)
+# Cache global EasyOCR
 _EASYOCR_READER_CACHE = None
 
 def get_easyocr_reader():
@@ -304,9 +304,9 @@ def assign_dates_intelligently(all_dates: list) -> dict:
     return result
 
 def merge_mrz_and_ocr_data_enhanced(mrz_data_dict: dict, ocr_dates: list) -> dict:
-    """Fusionne les données MRZ et OCR avec priorité intelligente"""
+    """Fusionne les données MRZ et OCR avec priorité """
 
-    # Attribuer les dates OCR de manière intelligente
+    # Attribuer les dates OCR
     ocr_date_assignments = assign_dates_intelligently(ocr_dates)
 
     # Commencer avec les données MRZ
@@ -323,7 +323,7 @@ def merge_mrz_and_ocr_data_enhanced(mrz_data_dict: dict, ocr_dates: list) -> dic
                 mrz_year = int(mrz_date.split('/')[2])
                 ocr_year = int(ocr_date.split('/')[2])
 
-                # Pour les dates d'expiration, privilégier FORTEMENT les dates futures
+                # Pour les dates d'expiration, privilégier les dates futures
                 if date_type == 'expiryDate':
                     # Si OCR est future et MRZ est passée, privilégier OCR
                     if ocr_year >= 2025 and mrz_year < 2025:
@@ -531,7 +531,10 @@ def detect_document_type_and_side(image_path: str) -> Tuple[str, str]:
             'RCGION',
             'DUPARTOINONT',
             'COMMUNU',
-            'NIN'
+            'NIN',
+            'NUMERO D ELECTEUR',
+            'REGION',
+            'COMMUNE'
         ]
 
         verso_senegal_count = sum(1 for indicator in verso_senegal_indicators if indicator in text_norm)
@@ -640,7 +643,7 @@ def extract_mrz_with_passporteye(image_path: str) -> Dict:
         return {}
 
 def merge_data_without_duplicates(recto_data: Dict, verso_data: Dict) -> Dict:
-    """Fusionne les données recto/verso avec documentNumber unifié (propre)"""
+    """Fusionne les données recto/verso avec documentNumber """
     merged_data = {}
 
     # Priorité au verso pour les informations MRZ
@@ -675,7 +678,7 @@ def merge_data_without_duplicates(recto_data: Dict, verso_data: Dict) -> Dict:
         elif field in verso_data:
             merged_data[field] = verso_data[field]
 
-    # Ajouter les autres champs sans conflit (en excluant fullDocumentNumber)
+    # Ajouter les autres champs sans conflit
     all_fields = set(recto_data.keys()) | set(verso_data.keys())
     handled_fields = set(mrz_priority_fields) | set(recto_priority_fields) | {'documentNumber', 'fullDocumentNumber'}
 
@@ -694,7 +697,7 @@ def extract_senegalese_recto(text: str) -> Dict:
     # Utiliser la nouvelle fonction d'extraction des dates
     dates = extract_dates_from_text(text)
 
-    # Attribution des dates (pas de date de naissance sur le recto)
+    # Attribution des dates
     for date_str in dates:
         year = int(date_str.split('/')[2])
         if 2000 <= year <= 2025 and 'issueDate' not in data:
@@ -750,7 +753,7 @@ def extract_senegalese_recto(text: str) -> Dict:
         if data.get('birthPlace'):
             break
 
-    # Centre d'enregistrement (amélioré)
+    # Centre d'enregistrement
     center_patterns = [
         r'(PREF\.?\s*DE\s*SAINT\s*LO[UI]*S)',
         r'Centre\s*d\'enregistrement\s*([A-Z\s\.]+?)(?:\s*Adresse|\s*$)',
@@ -766,7 +769,7 @@ def extract_senegalese_recto(text: str) -> Dict:
                 data['registrationCenter'] = center.upper()
                 break
 
-    # Adresse du domicile (améliorée)
+    # Adresse du domicile
     address_patterns = [
         r'(NGALLELE\s*S[TL]\s*LOUIS)',
         r'(NGALLELE\s*SAINT\s*LOUIS)',
@@ -867,11 +870,11 @@ def extract_french_recto(text: str) -> Dict:
                 data['surname'] = surname.upper()
                 break
 
-    # Prénoms (améliorés)
+    # Prénoms
     givennames_patterns = [
         r'Pr[eé]noms[^A-Z]*(?:Given names)?[^A-Z]*([A-ZÀ-ÿ\s\-\',]+?)(?:\s*SEXE|\s*Sex|\s*NATIONALIT)',
         r'PRENOMS\s+([A-ZÀ-ÿ\s\-\',]+?)(?:\s*SEXE|\s*NATIONALIT)',
-        r'MARTIN\s+([A-ZÀ-ÿ\s\-\',]+?)(?:\s*FRA|\s*SEX)',  # Spécifique à cet exemple
+        r'MARTIN\s+([A-ZÀ-ÿ\s\-\',]+?)(?:\s*FRA|\s*SEX)',
     ]
 
     for pattern in givennames_patterns:
@@ -883,11 +886,11 @@ def extract_french_recto(text: str) -> Dict:
                 data['givenNames'] = givennames.title()
                 break
 
-    # Lieu de naissance (amélioré)
+    # Lieu de naissance
     birthplace_patterns = [
         r'LIEU DE NAISSANCE[^A-Z]*(?:Place of birth)?[^A-Z]*([A-ZÀ-ÿ\s\-\']+?)(?:\s*NOM D[\'"]USAGE|\s*N[°\']\s*DU)',
         r'LIEU DE NAISSANCE\s+([A-ZÀ-ÿ\s\-\']+?)(?:\s*NOM|\s*N[°\']\s*DU)',
-        # Corriger le pattern pour éviter "PARIS NOM D USAGE"
+        # Corriger le pattern pour éviter des erreurs de cast
         r'LIEU DE NAISSANCE\s+([A-ZÀ-ÿ\s\-\']+?)(?:\s*NOM\s*D)',
         r'LIEU DE NAISSANCE[^A-Z]*([A-ZÀ-ÿ\s\-\']+?)(?:\s*NOM)',
     ]
@@ -968,7 +971,7 @@ def extract_french_verso(text: str, image_path: str) -> Dict:
             address = match.group(1).strip()
             # Nettoyer l'adresse
             address = re.sub(r'\s+', ' ', address)  # Normaliser les espaces
-            address = re.sub(r'^\d+\s*m\s*', '', address)  # Supprimer "768 m" au début
+            address = re.sub(r'^\d+\s*m\s*', '', address)
             if len(address) > 15:  # Adresse significative
                 data['address'] = address.upper()
                 break

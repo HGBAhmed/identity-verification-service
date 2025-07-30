@@ -14,7 +14,19 @@ out/
 .classpath
 .factorypath
 
-# Variables d'environnement
+#variable d'environnement
+# Fichiers sensibles
 .env
+*.env
 .env.local
 .env.production
+application-*.properties
+
+# Dossiers temporaires
+/temp/
+/uploads/
+/logs/
+
+# Secrets
+**/secrets/
+**/private/
