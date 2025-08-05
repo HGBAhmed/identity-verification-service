@@ -88,7 +88,7 @@ public class OpenKMService {
 
             HttpResponse<String> response = httpClient.toBlocking().exchange(request, String.class);
 
-            if (response.getStatus().getCode() == 200) {
+            if (response.getStatus().getCode() >= 200 && response.getStatus().getCode() < 300) {
                 log.info("Connexion OpenKM réussie");
             } else {
                 log.warn("Problème connexion OpenKM - Status: {}", response.getStatus());

@@ -3,6 +3,11 @@ import json
 import re
 import unicodedata
 from typing import Dict, Optional, Tuple
+import warnings
+
+# les warnings spécifiques
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # Imports avec gestion d'erreurs
 try:
@@ -224,15 +229,19 @@ def clean_mrz_text(text: str) -> str:
     for wrong, correct in corrections.items():
         cleaned = cleaned.replace(wrong, correct)
 
-    # Corrections génériques pour les erreurs OCR/MRZ communes
-    # Supprimer les caractères répétés à la fin (plus de 2 fois)
+    #  Nettoyage avancé des espaces et caractères répétés
+    # Supprimer les espaces multiples
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+
+    # Supprimer les lettres répétées
+    cleaned = re.sub(r'([A-Z])\1{2,}', r'\1', cleaned)
+
+    # Supprimer les lettres isolées en fin
+    cleaned = re.sub(r'\s+[A-Z](\s+[A-Z]+)*$', '', cleaned)
+
+    # Corrections génériques
     cleaned = re.sub(r'([A-Z])\1{2,}$', r'\1', cleaned)
-
-    # Corriger les fins de mots communes
-    # Si le mot se termine par des lettres répétées, prendre seulement la première
     cleaned = re.sub(r'([KRSTN])\1+$', r'\1', cleaned)
-
-    # Supprimer les caractères étranges en fin de mot
     cleaned = re.sub(r'[^A-Z\s]$', '', cleaned)
 
     return cleaned.strip()
@@ -1216,11 +1225,96 @@ def extract_passport(image_path: str) -> Dict:
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
 
+def validate_document_type(image_path: str, detected_type: str, detected_side: str) -> Dict:
+    """Valide que le document détecté est bien supporté"""
+
+    if not EASYOCR_AVAILABLE:
+        return {'valid': True, 'confidence': 'low'}
+
+    try:
+        reader = get_easyocr_reader()
+        results = reader.readtext(image_path)
+        text = ' '.join([r[1] for r in results if r[2] > 0.2])  # Seuil abaissé 0.3 à 0.2
+        text_norm = normalize_text(text)
+
+        # Indicateurs de documents NON supportés
+        unsupported_indicators = [
+            'CARTE ETUDIANT', 'STUDENT CARD',
+            'CARTE DE SEJOUR', 'RESIDENCE PERMIT',
+            'PERMIS DE CONDUIRE', 'DRIVING LICENSE', 'DRIVER LICENSE',
+            'CARTE VITALE', 'SOCIAL SECURITY',
+            'BIRTH CERTIFICATE', 'ACTE DE NAISSANCE'
+        ]
+
+        for indicator in unsupported_indicators:
+            if indicator in text_norm:
+                return {
+                    'valid': False,
+                    'error': f'Document type not supported: {indicator}',
+                    'error_type': 'UNSUPPORTED_DOCUMENT_TYPE'
+                }
+
+        # Validation spécifique par type détecté
+        if detected_type == 'PASSPORT':
+            #VALIDATION pour passeports
+            passport_indicators = ['PASSPORT', 'PASSEPORT', 'P<', 'REPUBLIQUE', 'REPUBLIC']
+            has_passport_indicator = any(ind in text_norm for ind in passport_indicators)
+
+            # accepter si MRZ détectée OU indicateurs trouvés
+            has_mrz_pattern = bool(re.search(r'[A-Z0-9]{20,}', text_norm))  # Pattern MRZ général
+
+            if not has_passport_indicator and not has_mrz_pattern:
+                return {
+                    'valid': False,
+                    'error': 'Detected as passport but no passport indicators found',
+                    'error_type': 'INVALID_DOCUMENT_TYPE'
+                }
+
+        elif detected_type == 'ID_CARD_FRENCH':
+            # VALIDATION pour cartes françaises
+            french_indicators = ['REPUBLIQUE FRANCAISE', 'CARTE NATIONALE', 'IDENTITY CARD', 'FRA', 'FRANCE']
+            has_french_indicator = any(ind in text_norm for ind in french_indicators)
+
+            if not has_french_indicator:
+                return {
+                    'valid': False,
+                    'error': 'Detected as French ID card but missing French indicators',
+                    'error_type': 'INVALID_DOCUMENT_TYPE'
+                }
+
+        elif detected_type == 'ID_CARD_SENEGALESE':
+            #VALIDATION pour cartes sénégalaises
+            senegal_indicators = ['REPUBLIQUE DU SENEGAL', 'SENEGAL', 'CARTE IDENTITE', 'CEDEAO', 'SEN']
+            has_senegal_indicator = any(ind in text_norm for ind in senegal_indicators)
+
+            if not has_senegal_indicator:
+                return {
+                    'valid': False,
+                    'error': 'Detected as Senegalese ID card but missing Senegalese indicators',
+                    'error_type': 'INVALID_DOCUMENT_TYPE'
+                }
+
+        return {'valid': True, 'confidence': 'high'}
+
+    except Exception as e:
+        return {'valid': True, 'confidence': 'low', 'validation_error': str(e)}
+
 def extract_document_data(image_path: str, expected_side: str = None) -> Dict:
-    """Fonction principale d'extraction"""
+    """Fonction principale d'extraction avec validation"""
     try:
         # Détection du type et du côté
         doc_type, detected_side = detect_document_type_and_side(image_path)
+
+        # VALIDATION DU TYPE DÉTECTÉ
+        validation = validate_document_type(image_path, doc_type, detected_side)
+
+        if not validation['valid']:
+            return {
+                'status': 'error',
+                'error': validation['error'],
+                'error_type': validation.get('error_type', 'UNSUPPORTED_DOCUMENT_TYPE'),
+                'detected_type': doc_type
+            }
 
         # Utiliser le côté attendu si fourni, sinon utiliser le côté détecté
         side = expected_side if expected_side else detected_side
