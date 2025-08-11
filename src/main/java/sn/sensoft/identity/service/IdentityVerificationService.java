@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.util.UUID;
 import sn.sensoft.identity.repository.VerificationFileRepository;
 import java.util.Optional;
+
 @Singleton
 public class IdentityVerificationService {
 
