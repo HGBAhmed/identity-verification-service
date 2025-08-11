@@ -84,19 +84,20 @@ public class IdentityVerificationService {
     }
 
     /**
-     * Vérification complète avec validation du type attendu
+     * Vérification complète avec validation du type attendu et seuil configurable
      */
     @Transactional
     public VerificationResultDto processVerificationWithTypeValidation(String userIdentifier,
                                                                        CompletedFileUpload document,
                                                                        CompletedFileUpload photo,
-                                                                       String expectedType) {
-        log.info("Début vérification complète avec validation type pour utilisateur: {}, type attendu: {}",
-                userIdentifier, expectedType);
+                                                                       String expectedType,
+                                                                       Double threshold) {
+        log.info("Début vérification complète avec validation type pour utilisateur: {}, type attendu: {}, seuil: {}",
+                userIdentifier, expectedType, threshold);
 
         try {
             // Traitement normal
-            VerificationResultDto result = processVerification(userIdentifier, document, photo);
+            VerificationResultDto result = processVerification(userIdentifier, document, photo, threshold);
 
             if (!"FAILED".equals(result.getStatus())) {
                 // Vérifier le type si on a des données de document
@@ -137,6 +138,17 @@ public class IdentityVerificationService {
             resultService.saveErrorResult(requestId, userIdentifier, "Erreur: " + e.getMessage(), null);
             return errorResult;
         }
+    }
+
+    /**
+     * Vérification complète avec validation du type attendu (sans seuil - compatibilité)
+     */
+    @Transactional
+    public VerificationResultDto processVerificationWithTypeValidation(String userIdentifier,
+                                                                       CompletedFileUpload document,
+                                                                       CompletedFileUpload photo,
+                                                                       String expectedType) {
+        return processVerificationWithTypeValidation(userIdentifier, document, photo, expectedType, null);
     }
 
     /**
@@ -278,16 +290,19 @@ public class IdentityVerificationService {
         return false;
     }
 
-
+    /**
+     * Vérification complète avec seuil configurable
+     */
     @Transactional
     public VerificationResultDto processVerification(String userIdentifier,
                                                      CompletedFileUpload identityDocument,
-                                                     CompletedFileUpload userPhoto) {
+                                                     CompletedFileUpload userPhoto,
+                                                     Double threshold) {
         String sessionId = null;
         UUID documentFileId = null;
         UUID photoFileId = null;
 
-        log.info("Début vérification complète pour utilisateur: {}", userIdentifier);
+        log.info("Début vérification complète pour utilisateur: {} avec seuil: {}", userIdentifier, threshold);
 
         try {
             // VALIDATION DES FICHIERS
@@ -367,17 +382,18 @@ public class IdentityVerificationService {
                 log.error("Erreur extraction document pour session {}: {}", sessionId, e.getMessage(), e);
             }
 
-            // COMPARAISON FACIALE
-            log.debug("Début comparaison faciale pour session: {}", sessionId);
+            // COMPARAISON FACIALE AVEC SEUIL
+            log.debug("Début comparaison faciale pour session: {} avec seuil: {}", sessionId, threshold);
             try {
                 String docPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
                 String photoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.USER_PHOTO);
 
                 FaceComparisonService.FaceComparisonResult faceComparison =
-                        faceComparisonService.compareImages(docPath, photoPath);
+                        faceComparisonService.compareImages(docPath, photoPath, threshold);
 
-                log.info("Comparaison faciale terminée pour session: {} - Vérifié: {}, Confiance: {:.3f}",
-                        sessionId, faceComparison.isVerified(), faceComparison.getConfidence());
+                log.info("Comparaison faciale terminée pour session: {} - Vérifié: {}, Confiance: {:.3f}, Seuil: {}",
+                        sessionId, faceComparison.isVerified(), faceComparison.getConfidence(),
+                        threshold != null ? threshold : "défaut");
 
                 // METTRE À JOUR LA SESSION AVEC LES DONNÉES D'EXTRACTION
                 if (documentExtraction != null && documentExtraction.isSuccessful()) {
@@ -447,6 +463,16 @@ public class IdentityVerificationService {
         }
     }
 
+    /**
+     * Vérification complète
+     */
+    @Transactional
+    public VerificationResultDto processVerification(String userIdentifier,
+                                                     CompletedFileUpload identityDocument,
+                                                     CompletedFileUpload userPhoto) {
+        return processVerification(userIdentifier, identityDocument, userPhoto, null);
+    }
+
     @Transactional
     public DocumentProcessingResult processDocumentOnly(String userIdentifier, CompletedFileUpload identityDocument) {
         String sessionId = null;
@@ -507,11 +533,14 @@ public class IdentityVerificationService {
         }
     }
 
+    /**
+     * Comparaison photo avec seuil configurable
+     */
     @Transactional
-    public VerificationResultDto processPhotoComparison(String documentId, CompletedFileUpload userPhoto) {
+    public VerificationResultDto processPhotoComparison(String documentId, CompletedFileUpload userPhoto, Double threshold) {
         UUID photoFileId = null;
 
-        log.info("Début comparaison photo pour document: {}", documentId);
+        log.info("Début comparaison photo pour document: {} avec seuil: {}", documentId, threshold);
 
         try {
             VerificationSession session = sessionService.getSession(documentId);
@@ -553,15 +582,16 @@ public class IdentityVerificationService {
 
             log.debug("Photo sauvegardée avec succès: {} pour document: {}", photoFileId, documentId);
 
-            log.debug("Début comparaison faciale pour document: {}", documentId);
+            log.debug("Début comparaison faciale pour document: {} avec seuil: {}", documentId, threshold);
             String docPath = fileStorageService.getFilePathForProcessing(documentId, FileType.IDENTITY_DOCUMENT);
             String photoPath = fileStorageService.getFilePathForProcessing(documentId, FileType.USER_PHOTO);
 
             FaceComparisonService.FaceComparisonResult faceComparison =
-                    faceComparisonService.compareImages(docPath, photoPath);
+                    faceComparisonService.compareImages(docPath, photoPath, threshold);
 
-            log.info("Comparaison faciale terminée pour document: {} - Vérifié: {}, Confiance: {:.3f}",
-                    documentId, faceComparison.isVerified(), faceComparison.getConfidence());
+            log.info("Comparaison faciale terminée pour document: {} - Vérifié: {}, Confiance: {:.3f}, Seuil: {}",
+                    documentId, faceComparison.isVerified(), faceComparison.getConfidence(),
+                    threshold != null ? threshold : "défaut");
 
             String requestId = sessionService.generateShortRequestId();
             VerificationResultDto result = VerificationResultDto.successWithData(
@@ -597,6 +627,14 @@ public class IdentityVerificationService {
         } finally {
             cleanupTempFiles();
         }
+    }
+
+    /**
+     * Comparaison photo
+     */
+    @Transactional
+    public VerificationResultDto processPhotoComparison(String documentId, CompletedFileUpload userPhoto) {
+        return processPhotoComparison(documentId, userPhoto, null);
     }
 
     private void cleanupTempFiles() {

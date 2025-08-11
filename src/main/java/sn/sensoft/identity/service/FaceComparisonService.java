@@ -18,6 +18,9 @@ public class FaceComparisonService {
     private final String pythonScriptPath;
     private final ObjectMapper objectMapper;
 
+    @Value("${app.face-comparison.default-threshold:0.68}")
+    private double defaultThreshold;
+
     public FaceComparisonService(@Value("${app.face-comparison.python-script-path}") String pythonScriptPath,
                                  ObjectMapper objectMapper) {
         this.pythonScriptPath = pythonScriptPath;
@@ -25,13 +28,15 @@ public class FaceComparisonService {
         log.info("FaceComparisonService initialisé avec script: {}", pythonScriptPath);
     }
 
-    public FaceComparisonResult compareImages(String imagePath1, String imagePath2)
+    public FaceComparisonResult compareImages(String imagePath1, String imagePath2, Double customThreshold)
             throws IOException, InterruptedException {
 
-        log.debug("Début comparaison faciale entre: {} et {}", imagePath1, imagePath2);
+        double thresholdToUse = customThreshold != null ? customThreshold : defaultThreshold;
+
+        log.debug("Début comparaison faciale entre: {} et {} avec seuil: {}", imagePath1, imagePath2, thresholdToUse);
 
         ProcessBuilder processBuilder = new ProcessBuilder(
-                "python", pythonScriptPath, imagePath1, imagePath2
+                "python", pythonScriptPath, imagePath1, imagePath2, String.valueOf(thresholdToUse)
         );
 
         Process process = processBuilder.start();
@@ -56,8 +61,14 @@ public class FaceComparisonService {
             throw new RuntimeException("Python script failed. Error: " + errorOutput + ". Output: " + output);
         }
 
-        log.info("Comparaison faciale réussie pour images: {} et {}", imagePath1, imagePath2);
+        log.info("Comparaison faciale réussie pour images: {} et {} avec seuil: {}", imagePath1, imagePath2, thresholdToUse);
         return parseComparisonResult(output);
+    }
+
+    // Garder la méthode existante pour compatibilité
+    public FaceComparisonResult compareImages(String imagePath1, String imagePath2)
+            throws IOException, InterruptedException {
+        return compareImages(imagePath1, imagePath2, null);
     }
 
     private FaceComparisonResult parseComparisonResult(String output) throws IOException {
@@ -90,8 +101,21 @@ public class FaceComparisonService {
             result.setConfidence(((Number) jsonNode.get("confidence")).doubleValue());
             result.setStatus((String) jsonNode.get("status"));
 
-            log.info("Comparaison faciale terminée - Vérifié: {}, Confiance: {:.3f}, Statut: {}",
-                    result.isVerified(), result.getConfidence(), result.getStatus());
+            if (jsonNode.containsKey("threshold")) {
+                result.setThreshold(((Number) jsonNode.get("threshold")).doubleValue());
+                log.debug("Seuil utilisé: {}", result.getThreshold());
+            }
+            if (jsonNode.containsKey("default_threshold")) {
+                result.setDefaultThreshold(((Number) jsonNode.get("default_threshold")).doubleValue());
+                log.debug("Seuil par défaut: {}", result.getDefaultThreshold());
+            }
+            if (jsonNode.containsKey("custom_threshold_used")) {
+                result.setCustomThresholdUsed((Boolean) jsonNode.get("custom_threshold_used"));
+                log.debug("Seuil personnalisé utilisé: {}", result.isCustomThresholdUsed());
+            }
+
+            log.info("Comparaison faciale terminée - Vérifié: {}, Confiance: {:.3f}, Seuil: {:.3f}, Seuil personnalisé: {}",
+                    result.isVerified(), result.getConfidence(), result.getThreshold(), result.isCustomThresholdUsed());
 
             if (jsonNode.containsKey("error")) {
                 result.setError((String) jsonNode.get("error"));
@@ -108,6 +132,9 @@ public class FaceComparisonService {
     public static class FaceComparisonResult {
         private boolean verified;
         private double confidence;
+        private double threshold;
+        private Double defaultThreshold;
+        private boolean customThresholdUsed;
         private String status;
         private String error;
 
@@ -116,6 +143,15 @@ public class FaceComparisonService {
 
         public double getConfidence() { return confidence; }
         public void setConfidence(double confidence) { this.confidence = confidence; }
+
+        public double getThreshold() { return threshold; }
+        public void setThreshold(double threshold) { this.threshold = threshold; }
+
+        public Double getDefaultThreshold() { return defaultThreshold; }
+        public void setDefaultThreshold(Double defaultThreshold) { this.defaultThreshold = defaultThreshold; }
+
+        public boolean isCustomThresholdUsed() { return customThresholdUsed; }
+        public void setCustomThresholdUsed(boolean customThresholdUsed) { this.customThresholdUsed = customThresholdUsed; }
 
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }

@@ -50,7 +50,7 @@ def initialize_deepface():
             _DEEPFACE_MODEL_LOADED = True
 
 
-def compare_faces(img1_path, img2_path):
+def compare_faces(img1_path, img2_path, custom_threshold=None):
     # S'assurer que le modèle est chargé
     initialize_deepface()
 
@@ -60,11 +60,16 @@ def compare_faces(img1_path, img2_path):
                                  model_name='VGG-Face',
                                  distance_metric='cosine')
 
+        threshold_to_use = custom_threshold if custom_threshold is not None else result['threshold']
+        is_verified = result['distance'] <= threshold_to_use
+
         return {
             'verified': result['verified'],
             'distance': result['distance'],
             'confidence': 1 - result['distance'],
-            'threshold': result['threshold'],
+            'threshold': threshold_to_use,
+            'default_threshold': result['threshold'],
+            'custom_threshold_used': custom_threshold is not None,
             'status': 'success'
         }
     except Exception as e:
@@ -72,17 +77,27 @@ def compare_faces(img1_path, img2_path):
             'verified': False,
             'distance': 1.0,
             'confidence': 0.0,
+            'threshold': custom_threshold or 0.68,
             'error': str(e),
             'status': 'error'
         }
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(json.dumps({'error': 'Usage: python face_comparison.py <img1_path> <img2_path>'}))
+    if len(sys.argv) < 3:
+        print(json.dumps({'error': 'Usage: python face_comparison.py <img1_path> <img2_path> [threshold]'}))
         sys.exit(1)
 
     img1_path = sys.argv[1]
     img2_path = sys.argv[2]
 
-    result = compare_faces(img1_path, img2_path)
+    custom_threshold = None
+    if len(sys.argv) >= 4:
+        try:
+            custom_threshold = float(sys.argv[3])
+            if not (0.0 <= custom_threshold <= 1.0):
+                custom_threshold = None
+        except ValueError:
+            custom_threshold = None
+
+    result = compare_faces(img1_path, img2_path, custom_threshold)
     print(json.dumps(result))

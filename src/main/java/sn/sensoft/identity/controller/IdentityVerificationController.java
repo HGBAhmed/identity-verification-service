@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import io.micronaut.core.annotation.Nullable;
 
 @Controller("/api/v1/verification")
 @ExecuteOn(TaskExecutors.BLOCKING)
@@ -144,10 +145,18 @@ public class IdentityVerificationController {
     @Secured({"VERIFICATION_USER", "ADMIN"})
     public HttpResponse<VerificationResultDto> compareWithPhoto(
             @PathVariable String documentId,
-            @Part("userPhoto") CompletedFileUpload userPhoto) {
+            @Part("userPhoto") CompletedFileUpload userPhoto,
+            @QueryValue @Nullable Double threshold) {
 
         try {
-            log.debug("Début comparaison photo pour document: {}", documentId);
+            log.debug("Début comparaison photo pour document: {} avec seuil: {}", documentId, threshold);
+
+            if (threshold != null && (threshold < 0.0 || threshold > 1.0)) {
+                log.warn("Seuil invalide {} pour document {}", threshold, documentId);
+                return HttpResponse.badRequest(
+                        VerificationResultDto.error("Seuil invalide. Doit être entre 0.0 et 1.0")
+                );
+            }
 
             String photoValidation = fileValidator.getValidationError(userPhoto);
             if (photoValidation != null) {
@@ -157,7 +166,7 @@ public class IdentityVerificationController {
                 );
             }
 
-            VerificationResultDto result = verificationService.processPhotoComparison(documentId, userPhoto);
+            VerificationResultDto result = verificationService.processPhotoComparison(documentId, userPhoto, threshold);
 
             if ("FAILED".equals(result.getStatus())) {
                 log.warn("Comparaison échouée pour document: {}", documentId);
