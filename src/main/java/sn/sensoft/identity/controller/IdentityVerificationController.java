@@ -61,20 +61,6 @@ public class IdentityVerificationController {
         return processDocumentUpload(passportDocument, userIdentifier, "PASSPORT");
     }
 
-//    /**
-//     * Vérification complète PASSEPORT
-//     */
-//    @Post(value = "/passport/complete", consumes = MediaType.MULTIPART_FORM_DATA)
-//    @Secured({"VERIFICATION_USER", "ADMIN"})
-//    public HttpResponse<VerificationResultDto> verifyPassport(
-//            @Part("passportDocument") CompletedFileUpload passportDocument,
-//            @Part("userPhoto") CompletedFileUpload userPhoto,
-//            @Part("userIdentifier") String userIdentifier) {
-//
-//        log.info("Début vérification complète passeport pour utilisateur: {}", userIdentifier);
-//        return processCompleteVerification(passportDocument, userPhoto, userIdentifier, "PASSPORT");
-//    }
-
     /**
      * Upload et extraction d'une CARTE D'IDENTITÉ
      */
@@ -87,20 +73,6 @@ public class IdentityVerificationController {
         log.info("Début upload carte d'identité pour utilisateur: {}", userIdentifier);
         return processDocumentUpload(idCardDocument, userIdentifier, "ID_CARD");
     }
-
-//    /**
-//     * Vérification complète CARTE D'IDENTITÉ
-//     */
-//    @Post(value = "/id-card/complete", consumes = MediaType.MULTIPART_FORM_DATA)
-//    @Secured({"VERIFICATION_USER", "ADMIN"})
-//    public HttpResponse<VerificationResultDto> verifyIdCard(
-//            @Part("idCardDocument") CompletedFileUpload idCardDocument,
-//            @Part("userPhoto") CompletedFileUpload userPhoto,
-//            @Part("userIdentifier") String userIdentifier) {
-//
-//        log.info("Début vérification complète carte d'identité pour utilisateur: {}", userIdentifier);
-//        return processCompleteVerification(idCardDocument, userPhoto, userIdentifier, "ID_CARD");
-//    }
 
     /**
      * Upload RECTO + VERSO d'une carte d'identité
@@ -436,26 +408,6 @@ public class IdentityVerificationController {
             return HttpResponse.serverError();
         }
     }
-
-//    /**
-//     * Lister les fichiers d'un résultat
-//     */
-//    @Get("/files/result/{requestId}")
-//    @Secured("ADMIN")
-//    public HttpResponse<List<FileInfoDto>> getResultFiles(@PathVariable String requestId) {
-//        try {
-//            log.debug("Récupération fichiers pour résultat: {}", requestId);
-//
-//            List<FileInfoDto> files = fileManagementService.getResultFiles(requestId);
-//
-//            log.info("Fichiers résultat {} récupérés: {} fichiers", requestId, files.size());
-//            return HttpResponse.ok(files);
-//
-//        } catch (Exception e) {
-//            log.error("Erreur récupération fichiers résultat {}: {}", requestId, e.getMessage(), e);
-//            return HttpResponse.serverError();
-//        }
-//    }
 
     /**
      * Obtenir les métadonnées d'un fichier
