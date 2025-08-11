@@ -13,7 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
-
+import sn.sensoft.identity.repository.VerificationFileRepository;
+import java.util.Optional;
 @Singleton
 public class IdentityVerificationService {
 
@@ -36,6 +37,9 @@ public class IdentityVerificationService {
 
     @Inject
     private VerificationResultService resultService;
+
+    @Inject
+    private VerificationFileRepository fileRepository;
 
     public IdentityVerificationService() {
         log.info("IdentityVerificationService initialisé");
@@ -554,6 +558,11 @@ public class IdentityVerificationService {
                 return errorResult;
             }
 
+            Optional<VerificationFile> existingPhoto = fileRepository.findBySessionIdAndFileType(documentId, FileType.USER_PHOTO);
+            if (existingPhoto.isPresent()) {
+                log.debug("Suppression ancienne photo pour session: {}", documentId);
+                fileStorageService.permanentDeleteFile(existingPhoto.get().getId());
+            }
             log.debug("Session récupérée: {} pour utilisateur: {}", documentId, session.getUserIdentifier());
 
             String photoValidation = fileValidator.getValidationError(userPhoto);
