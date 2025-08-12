@@ -55,6 +55,6 @@ public interface VerificationFileRepository extends JpaRepository<VerificationFi
 
     // à ajouter parce que micronaut ne le fait pas auto
     @Override
-    VerificationFile update(VerificationFile file);
+    <S extends VerificationFile> S update(S file);
 
 }

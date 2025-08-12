@@ -48,7 +48,7 @@ public interface VerificationResultRepository extends JpaRepository<Verification
 
     //parce que micronaut ne le fait pas auto
     @Override
-    VerificationResult update(VerificationResult result);
+    <S extends VerificationResult> S update(S result);
 
     // Verifier si un utilisateur a deja fait des verifications
     boolean existsByUserIdentifier(String userIdentifier);

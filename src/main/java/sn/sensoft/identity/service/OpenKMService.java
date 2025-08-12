@@ -45,7 +45,7 @@ public class OpenKMService {
     private final String photosFolder;
     private final String tempFolder;
     private final String tempPath;
-    private final boolean enabled;
+//    private final boolean enabled;
 
     @Inject
     public OpenKMService(HttpClient httpClient,
@@ -55,8 +55,7 @@ public class OpenKMService {
                          @Value("${app.openkm.folders.identity-documents}") String documentsFolder,
                          @Value("${app.openkm.folders.user-photos}") String photosFolder,
                          @Value("${app.openkm.folders.temp}") String tempFolder,
-                         @Value("${app.file-storage.temp-path}") String tempPath,
-                         @Value("${app.openkm.enabled:false}") boolean enabled) {
+                         @Value("${app.file-storage.temp-path}") String tempPath) {
 
         this.httpClient = httpClient;
         this.baseUrl = baseUrl;
@@ -66,14 +65,11 @@ public class OpenKMService {
         this.photosFolder = photosFolder;
         this.tempFolder = tempFolder;
         this.tempPath = tempPath;
-        this.enabled = enabled;
 
-        log.info("OpenKMService initialized - enabled: {}, baseUrl: {}", enabled, baseUrl);
+        log.info("OpenKMService initialized - baseUrl: {}", baseUrl);
 
-        if (enabled) {
-            createTempDirectory();
-            testOpenKMConnection();
-        }
+        createTempDirectory();
+        testOpenKMConnection();
     }
 
     // Test de connexion OpenKM
@@ -102,16 +98,10 @@ public class OpenKMService {
     // ================== UPLOAD METHODS ==================
 
     public OpenKMUploadResult uploadIdentityDocument(CompletedFileUpload file) throws IOException {
-        if (!enabled) {
-            throw new IOException("OpenKM est désactivé");
-        }
         return uploadFile(file, documentsFolder, "IDENTITY_DOCUMENT");
     }
 
     public OpenKMUploadResult uploadUserPhoto(CompletedFileUpload file) throws IOException {
-        if (!enabled) {
-            throw new IOException("OpenKM est désactivé");
-        }
         return uploadFile(file, photosFolder, "USER_PHOTO");
     }
 
@@ -193,11 +183,6 @@ public class OpenKMService {
      * Supprime un document dans OpenKM
      */
     public boolean deleteDocument(String openkmUuid, String openkmPath) {
-        if (!enabled) {
-            log.warn("OpenKM désactivé - impossible de supprimer le document");
-            return false;
-        }
-
         try {
             log.debug("Suppression document OpenKM - UUID: {}, Path: {}", openkmUuid, openkmPath);
 
@@ -319,10 +304,6 @@ public class OpenKMService {
     // DOWNLOAD METHODS
 
     public TempFileResult downloadToTempFile(String openkmUuid, String openkmPath) throws IOException {
-        if (!enabled) {
-            throw new IOException("OpenKM est désactivé");
-        }
-
         try {
             log.debug("Téléchargement depuis OpenKM - UUID: {}, Path: {}", openkmUuid, openkmPath);
 
@@ -545,9 +526,9 @@ public class OpenKMService {
         return openkmPath.substring(openkmPath.lastIndexOf('/') + 1);
     }
 
-    public boolean isEnabled() {
-        return enabled;
-    }
+//    public boolean isEnabled() {
+//        return enabled;
+//    }
 
     // CLASSES DE RESULTATS
 

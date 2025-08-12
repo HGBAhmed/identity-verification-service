@@ -37,5 +37,5 @@ public interface VerificationSessionRepository extends JpaRepository<Verificatio
 
     // à ajouter parce que apparemment pas pris en compte par micronaut
     @Override
-    VerificationSession update(VerificationSession session);
+    <S extends VerificationSession> S update(S session);
 }

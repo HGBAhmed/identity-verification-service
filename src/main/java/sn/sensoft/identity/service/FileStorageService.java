@@ -18,7 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+//import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 import java.awt.image.BufferedImage;
@@ -35,29 +35,20 @@ public class FileStorageService {
     private final VerificationFileRepository fileRepository;
     private final FileValidator fileValidator;
     private final PdfConversionService pdfConversionService;
-    private final boolean openKMEnabled;
-    private final String localBasePath;
+//    private final boolean openKMEnabled;
+//    private final String localBasePath;
 
     @Inject
     public FileStorageService(OpenKMService openKMService,
                               VerificationFileRepository fileRepository,
                               FileValidator fileValidator,
-                              PdfConversionService pdfConversionService,
-                              @Value("${app.openkm.enabled:true}") boolean openKMEnabled,
-                              @Value("${app.file-storage.base-path}") String localBasePath) {
+                              PdfConversionService pdfConversionService) {
         this.openKMService = openKMService;
         this.fileRepository = fileRepository;
         this.fileValidator = fileValidator;
         this.pdfConversionService = pdfConversionService;
-        this.openKMEnabled = openKMEnabled;
-        this.localBasePath = localBasePath;
 
-        log.info("FileStorageService initialisé - OpenKM: {}, Chemin local: {}, Support PDF: activé",
-                openKMEnabled, localBasePath);
-
-        if (!openKMEnabled) {
-            createLocalDirectories();
-        }
+        log.info("FileStorageService initialisé avec OpenKM exclusivement");
     }
 
     // MÉTHODES PUBLIQUES
@@ -126,23 +117,12 @@ public class FileStorageService {
 
             // Sauvegarde avec cache ou normale
             FileStorageResult result;
-            if (openKMEnabled) {
-                if (hasCachedBytes) {
-                    log.debug("Utilisation cache bytes pour sauvegarde OpenKM");
-                    result = saveFileToOpenKMWithCachedBytes(originalFile, cachedBytes, sessionId, fileType);
-                } else {
-                    log.debug("Sauvegarde OpenKM normale");
-                    result = saveFileToOpenKM(fileToProcess, sessionId, fileType);
-                }
+            if (hasCachedBytes) {
+                log.debug("Utilisation cache bytes pour sauvegarde OpenKM");
+                result = saveFileToOpenKMWithCachedBytes(originalFile, cachedBytes, sessionId, fileType);
             } else {
-                String subDirectory = fileType == FileType.IDENTITY_DOCUMENT ? "identity_documents" : "user_photos";
-                if (hasCachedBytes) {
-                    log.debug("Utilisation cache bytes pour sauvegarde locale");
-                    result = saveFileLocallyWithCachedBytes(originalFile, cachedBytes, sessionId, fileType, subDirectory);
-                } else {
-                    log.debug("Sauvegarde locale normale");
-                    result = saveFileLocally(fileToProcess, sessionId, fileType, subDirectory);
-                }
+                log.debug("Sauvegarde OpenKM normale");
+                result = saveFileToOpenKM(fileToProcess, sessionId, fileType);
             }
 
             // Ajout informations de conversion aux métadonnées
@@ -224,51 +204,51 @@ public class FileStorageService {
     }
 
     // Sauvegarde locale avec bytes cachés
-    private FileStorageResult saveFileLocallyWithCachedBytes(CompletedFileUpload originalFile, byte[] cachedBytes,
-                                                             String sessionId, FileType fileType, String subDirectory) throws IOException {
-        try {
-            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}",
-                    sessionId, fileType, subDirectory);
-
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + originalFile.getFilename();
-
-            Path directory = Paths.get(localBasePath, subDirectory);
-            Path filePath = directory.resolve(filename);
-
-            // Utiliser les bytes cachés au lieu de l'InputStream
-            Files.write(filePath, cachedBytes);
-
-            // Sauvegarder les métadonnées en PostgreSQL
-            VerificationFile verificationFile = new VerificationFile(
-                    sessionId,
-                    fileType,
-                    UUID.randomUUID().toString(),
-                    filePath.toString(),
-                    subDirectory
-            );
-
-            verificationFile.setOriginalFilename(originalFile.getFilename());
-            verificationFile.setContentType(originalFile.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
-            verificationFile.setFileSize((long) cachedBytes.length);
-
-            verificationFile = fileRepository.save(verificationFile);
-
-            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
-                    sessionId, filePath, cachedBytes.length);
-
-            return FileStorageResult.success(
-                    verificationFile.getId(),
-                    verificationFile.getOpenkmUuid(),
-                    filePath.toString(),
-                    originalFile.getFilename()
-            );
-
-        } catch (Exception e) {
-            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
-            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
-        }
-    }
+//    private FileStorageResult saveFileLocallyWithCachedBytes(CompletedFileUpload originalFile, byte[] cachedBytes,
+//                                                             String sessionId, FileType fileType, String subDirectory) throws IOException {
+//        try {
+//            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}",
+//                    sessionId, fileType, subDirectory);
+//
+//            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+//            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + originalFile.getFilename();
+//
+//            Path directory = Paths.get(localBasePath, subDirectory);
+//            Path filePath = directory.resolve(filename);
+//
+//            // Utiliser les bytes cachés au lieu de l'InputStream
+//            Files.write(filePath, cachedBytes);
+//
+//            // Sauvegarder les métadonnées en PostgreSQL
+//            VerificationFile verificationFile = new VerificationFile(
+//                    sessionId,
+//                    fileType,
+//                    UUID.randomUUID().toString(),
+//                    filePath.toString(),
+//                    subDirectory
+//            );
+//
+//            verificationFile.setOriginalFilename(originalFile.getFilename());
+//            verificationFile.setContentType(originalFile.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
+//            verificationFile.setFileSize((long) cachedBytes.length);
+//
+//            verificationFile = fileRepository.save(verificationFile);
+//
+//            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
+//                    sessionId, filePath, cachedBytes.length);
+//
+//            return FileStorageResult.success(
+//                    verificationFile.getId(),
+//                    verificationFile.getOpenkmUuid(),
+//                    filePath.toString(),
+//                    originalFile.getFilename()
+//            );
+//
+//        } catch (Exception e) {
+//            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
+//            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
+//        }
+//    }
 
     // Bytes pour les chargements et l'extraction
     private static class CachedBytesFileUpload implements CompletedFileUpload {
@@ -348,31 +328,22 @@ public class FileStorageService {
         VerificationFile verificationFile = fileRepository.findBySessionIdAndFileType(sessionId, fileType)
                 .orElseThrow(() -> new IOException("Fichier non trouvé pour la session: " + sessionId + ", type: " + fileType));
 
-        if (openKMEnabled) {
-            return getOpenKMFileForProcessing(verificationFile);
-        } else {
-            // Mode local - retourne  le chemin
-            log.debug("Mode local - Retour du chemin: {}", verificationFile.getOpenkmPath());
-            return verificationFile.getOpenkmPath(); // on stocke le chemin local ici
-        }
+        return getOpenKMFileForProcessing(verificationFile);
     }
 
     // NETTOYAGE ENRICHI
     public void cleanupExpiredTempFiles() {
         log.debug("Démarrage nettoyage fichiers temporaires expirés");
 
-        if (openKMEnabled) {
-            // Nettoyer les fichiers temporaires OpenKM
-            openKMService.cleanupExpiredTempFiles();
+        openKMService.cleanupExpiredTempFiles();
 
-            // Nettoyer les enregistrements de fichiers temporaires expirés
-            int deletedCount = fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
-            if (deletedCount > 0) {
-                log.info("Nettoyage: {} enregistrements de fichiers temporaires expirés supprimés", deletedCount);
-            }
+        // Nettoyer les enregistrements de fichiers temporaires expirés
+        int deletedCount = fileRepository.deleteByTempExpiresAtBeforeAndTempPathIsNotNull(LocalDateTime.now());
+        if (deletedCount > 0) {
+            log.info("Nettoyage: {} enregistrements de fichiers temporaires expirés supprimés", deletedCount);
         }
 
-        //  Nettoyer les fichiers convertis expirés
+        // Nettoyer les fichiers convertis expirés
         pdfConversionService.cleanupConvertedFiles();
     }
 
@@ -461,49 +432,49 @@ public class FileStorageService {
         }
     }
 
-    private FileStorageResult saveFileLocally(CompletedFileUpload file, String sessionId,
-                                              FileType fileType, String subDirectory) throws IOException {
-        try {
-            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}", sessionId, fileType, subDirectory);
-
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + file.getFilename();
-
-            Path directory = Paths.get(localBasePath, subDirectory);
-            Path filePath = directory.resolve(filename);
-
-            Files.copy(file.getInputStream(), filePath);
-
-            // Sauvegarder les métadonnées en PostgreSQL (même en mode local)
-            VerificationFile verificationFile = new VerificationFile(
-                    sessionId,
-                    fileType,
-                    UUID.randomUUID().toString(), // UUID local généré
-                    filePath.toString(), // Chemin local stocké comme "openkmPath"
-                    subDirectory
-            );
-
-            verificationFile.setOriginalFilename(file.getFilename());
-            verificationFile.setContentType(file.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
-            verificationFile.setFileSize(file.getSize());
-
-            verificationFile = fileRepository.save(verificationFile);
-
-            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
-                    sessionId, filePath, file.getSize());
-
-            return FileStorageResult.success(
-                    verificationFile.getId(),
-                    verificationFile.getOpenkmUuid(),
-                    filePath.toString(),
-                    file.getFilename()
-            );
-
-        } catch (Exception e) {
-            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
-            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
-        }
-    }
+//    private FileStorageResult saveFileLocally(CompletedFileUpload file, String sessionId,
+//                                              FileType fileType, String subDirectory) throws IOException {
+//        try {
+//            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}", sessionId, fileType, subDirectory);
+//
+//            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+//            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + file.getFilename();
+//
+//            Path directory = Paths.get(localBasePath, subDirectory);
+//            Path filePath = directory.resolve(filename);
+//
+//            Files.copy(file.getInputStream(), filePath);
+//
+//            // Sauvegarder les métadonnées en PostgreSQL (même en mode local)
+//            VerificationFile verificationFile = new VerificationFile(
+//                    sessionId,
+//                    fileType,
+//                    UUID.randomUUID().toString(), // UUID local généré
+//                    filePath.toString(), // Chemin local stocké comme "openkmPath"
+//                    subDirectory
+//            );
+//
+//            verificationFile.setOriginalFilename(file.getFilename());
+//            verificationFile.setContentType(file.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
+//            verificationFile.setFileSize(file.getSize());
+//
+//            verificationFile = fileRepository.save(verificationFile);
+//
+//            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
+//                    sessionId, filePath, file.getSize());
+//
+//            return FileStorageResult.success(
+//                    verificationFile.getId(),
+//                    verificationFile.getOpenkmUuid(),
+//                    filePath.toString(),
+//                    file.getFilename()
+//            );
+//
+//        } catch (Exception e) {
+//            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
+//            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
+//        }
+//    }
 
     // MÉTHODES UTILITAIRES
 
@@ -543,20 +514,10 @@ public class FileStorageService {
                 return false;
             }
 
-            boolean physicalDeletionSuccess = false;
-
-            if (openKMEnabled) {
-                physicalDeletionSuccess = openKMService.deleteDocument(
-                        verificationFile.getOpenkmUuid(),
-                        verificationFile.getOpenkmPath()
-                );
-            } else {
-                try {
-                    physicalDeletionSuccess = Files.deleteIfExists(Paths.get(verificationFile.getOpenkmPath()));
-                } catch (IOException e) {
-                    log.error("Erreur suppression fichier local {}: {}", verificationFile.getOpenkmPath(), e.getMessage());
-                }
-            }
+            boolean physicalDeletionSuccess = openKMService.deleteDocument(
+                    verificationFile.getOpenkmUuid(),
+                    verificationFile.getOpenkmPath()
+            );
 
             // Supprimer l'enregistrement en base
             fileRepository.deleteById(fileId);
@@ -570,24 +531,24 @@ public class FileStorageService {
         }
     }
 
-    private void createLocalDirectories() {
-        try {
-            Files.createDirectories(Paths.get(localBasePath, "identity_documents"));
-            Files.createDirectories(Paths.get(localBasePath, "user_photos"));
-            log.info("Dossiers locaux créés avec succès: {}", localBasePath);
-        } catch (IOException e) {
-            log.error("Impossible de créer les répertoires locaux: {}", localBasePath, e);
-            throw new RuntimeException("Impossible de créer les répertoires locaux", e);
-        }
-    }
+//    private void createLocalDirectories() {
+//        try {
+//            Files.createDirectories(Paths.get(localBasePath, "identity_documents"));
+//            Files.createDirectories(Paths.get(localBasePath, "user_photos"));
+//            log.info("Dossiers locaux créés avec succès: {}", localBasePath);
+//        } catch (IOException e) {
+//            log.error("Impossible de créer les répertoires locaux: {}", localBasePath, e);
+//            throw new RuntimeException("Impossible de créer les répertoires locaux", e);
+//        }
+//    }
 
     public VerificationFile getFileMetadata(String sessionId, FileType fileType) {
         return fileRepository.findBySessionIdAndFileType(sessionId, fileType).orElse(null);
     }
 
-    public boolean isOpenKMEnabled() {
-        return openKMEnabled;
-    }
+//    public boolean isOpenKMEnabled() {
+//        return openKMEnabled;
+//    }
 
     // CLASSE DE RÉSULTAT
     public static class FileStorageResult {
