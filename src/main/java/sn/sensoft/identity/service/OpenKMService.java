@@ -45,7 +45,6 @@ public class OpenKMService {
     private final String photosFolder;
     private final String tempFolder;
     private final String tempPath;
-//    private final boolean enabled;
 
     @Inject
     public OpenKMService(HttpClient httpClient,
@@ -95,7 +94,7 @@ public class OpenKMService {
         }
     }
 
-    // ================== UPLOAD METHODS ==================
+    // UPLOAD METHODS
 
     public OpenKMUploadResult uploadIdentityDocument(CompletedFileUpload file) throws IOException {
         return uploadFile(file, documentsFolder, "IDENTITY_DOCUMENT");
@@ -526,12 +525,7 @@ public class OpenKMService {
         return openkmPath.substring(openkmPath.lastIndexOf('/') + 1);
     }
 
-//    public boolean isEnabled() {
-//        return enabled;
-//    }
-
     // CLASSES DE RESULTATS
-
     public static class OpenKMUploadResult {
         private final boolean success;
         private final String openkmUuid;

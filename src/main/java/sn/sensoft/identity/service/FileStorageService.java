@@ -35,8 +35,6 @@ public class FileStorageService {
     private final VerificationFileRepository fileRepository;
     private final FileValidator fileValidator;
     private final PdfConversionService pdfConversionService;
-//    private final boolean openKMEnabled;
-//    private final String localBasePath;
 
     @Inject
     public FileStorageService(OpenKMService openKMService,
@@ -202,53 +200,6 @@ public class FileStorageService {
             throw new IOException("Erreur sauvegarde OpenKM: " + e.getMessage(), e);
         }
     }
-
-    // Sauvegarde locale avec bytes cachés
-//    private FileStorageResult saveFileLocallyWithCachedBytes(CompletedFileUpload originalFile, byte[] cachedBytes,
-//                                                             String sessionId, FileType fileType, String subDirectory) throws IOException {
-//        try {
-//            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}",
-//                    sessionId, fileType, subDirectory);
-//
-//            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-//            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + originalFile.getFilename();
-//
-//            Path directory = Paths.get(localBasePath, subDirectory);
-//            Path filePath = directory.resolve(filename);
-//
-//            // Utiliser les bytes cachés au lieu de l'InputStream
-//            Files.write(filePath, cachedBytes);
-//
-//            // Sauvegarder les métadonnées en PostgreSQL
-//            VerificationFile verificationFile = new VerificationFile(
-//                    sessionId,
-//                    fileType,
-//                    UUID.randomUUID().toString(),
-//                    filePath.toString(),
-//                    subDirectory
-//            );
-//
-//            verificationFile.setOriginalFilename(originalFile.getFilename());
-//            verificationFile.setContentType(originalFile.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
-//            verificationFile.setFileSize((long) cachedBytes.length);
-//
-//            verificationFile = fileRepository.save(verificationFile);
-//
-//            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
-//                    sessionId, filePath, cachedBytes.length);
-//
-//            return FileStorageResult.success(
-//                    verificationFile.getId(),
-//                    verificationFile.getOpenkmUuid(),
-//                    filePath.toString(),
-//                    originalFile.getFilename()
-//            );
-//
-//        } catch (Exception e) {
-//            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
-//            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
-//        }
-//    }
 
     // Bytes pour les chargements et l'extraction
     private static class CachedBytesFileUpload implements CompletedFileUpload {
@@ -432,49 +383,6 @@ public class FileStorageService {
         }
     }
 
-//    private FileStorageResult saveFileLocally(CompletedFileUpload file, String sessionId,
-//                                              FileType fileType, String subDirectory) throws IOException {
-//        try {
-//            log.debug("Sauvegarde locale - Session: {}, Type: {}, Dossier: {}", sessionId, fileType, subDirectory);
-//
-//            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-//            String filename = timestamp + "_" + UUID.randomUUID().toString() + "_" + file.getFilename();
-//
-//            Path directory = Paths.get(localBasePath, subDirectory);
-//            Path filePath = directory.resolve(filename);
-//
-//            Files.copy(file.getInputStream(), filePath);
-//
-//            // Sauvegarder les métadonnées en PostgreSQL (même en mode local)
-//            VerificationFile verificationFile = new VerificationFile(
-//                    sessionId,
-//                    fileType,
-//                    UUID.randomUUID().toString(), // UUID local généré
-//                    filePath.toString(), // Chemin local stocké comme "openkmPath"
-//                    subDirectory
-//            );
-//
-//            verificationFile.setOriginalFilename(file.getFilename());
-//            verificationFile.setContentType(file.getContentType().map(MediaType::toString).orElse("application/octet-stream"));
-//            verificationFile.setFileSize(file.getSize());
-//
-//            verificationFile = fileRepository.save(verificationFile);
-//
-//            log.info("Fichier sauvegardé localement - Session: {}, Chemin: {}, Taille: {} bytes",
-//                    sessionId, filePath, file.getSize());
-//
-//            return FileStorageResult.success(
-//                    verificationFile.getId(),
-//                    verificationFile.getOpenkmUuid(),
-//                    filePath.toString(),
-//                    file.getFilename()
-//            );
-//
-//        } catch (Exception e) {
-//            log.error("Erreur sauvegarde locale pour session {}: {}", sessionId, e.getMessage(), e);
-//            throw new IOException("Erreur sauvegarde locale: " + e.getMessage(), e);
-//        }
-//    }
 
     // MÉTHODES UTILITAIRES
 
@@ -531,30 +439,15 @@ public class FileStorageService {
         }
     }
 
-//    private void createLocalDirectories() {
-//        try {
-//            Files.createDirectories(Paths.get(localBasePath, "identity_documents"));
-//            Files.createDirectories(Paths.get(localBasePath, "user_photos"));
-//            log.info("Dossiers locaux créés avec succès: {}", localBasePath);
-//        } catch (IOException e) {
-//            log.error("Impossible de créer les répertoires locaux: {}", localBasePath, e);
-//            throw new RuntimeException("Impossible de créer les répertoires locaux", e);
-//        }
-//    }
-
     public VerificationFile getFileMetadata(String sessionId, FileType fileType) {
         return fileRepository.findBySessionIdAndFileType(sessionId, fileType).orElse(null);
     }
-
-//    public boolean isOpenKMEnabled() {
-//        return openKMEnabled;
-//    }
 
     // CLASSE DE RÉSULTAT
     public static class FileStorageResult {
         private final boolean success;
         private final UUID fileId;
-        private final String fileReference; // UUID OpenKM ou chemin local
+        private final String fileReference; // UUID OpenKM
         private final String filePath;
         private final String originalFilename;
         private final String error;

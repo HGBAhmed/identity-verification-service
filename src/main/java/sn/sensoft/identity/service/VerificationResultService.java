@@ -32,7 +32,6 @@ public class VerificationResultService {
     }
 
     // SAUVEGARDE DES RÉSULTATS
-
     /**
      * Sauvegarde un résultat de vérification complet
      */
@@ -135,7 +134,6 @@ public class VerificationResultService {
     }
 
     // RECHERCHE ET CONSULTATION
-
     /**
      * Récupère un résultat par son request ID
      */

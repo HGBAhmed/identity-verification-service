@@ -229,35 +229,6 @@ public class FileManagementService {
         }
     }
 
-//    private FileDownloadResult downloadFromLocal(VerificationFile file) {
-//        try {
-//            log.debug("Téléchargement local: {}", file.getOpenkmPath());
-//
-//            if (!Files.exists(Paths.get(file.getOpenkmPath()))) {
-//                log.error("Fichier local non trouvé: {}", file.getOpenkmPath());
-//                return FileDownloadResult.error("Fichier physique non trouvé");
-//            }
-//
-//            InputStream inputStream = new FileInputStream(file.getOpenkmPath());
-//            MediaType mediaType = file.getContentType() != null ?
-//                    MediaType.of(file.getContentType()) : MediaType.APPLICATION_OCTET_STREAM_TYPE;
-//            StreamedFile streamedFile = new StreamedFile(inputStream, mediaType);
-//
-//            log.info("Téléchargement local réussi: {}", file.getOriginalFilename());
-//
-//            return FileDownloadResult.success(
-//                    streamedFile,
-//                    file.getOriginalFilename(),
-//                    file.getContentType(),
-//                    null
-//            );
-//
-//        } catch (Exception e) {
-//            log.error("Erreur téléchargement local pour fichier {}: {}", file.getId(), e.getMessage(), e);
-//            return FileDownloadResult.error("Erreur téléchargement local: " + e.getMessage());
-//        }
-//    }
-
     private FileInfoDto convertToDto(VerificationFile file) {
         return new FileInfoDto(
                 file.getId(),
