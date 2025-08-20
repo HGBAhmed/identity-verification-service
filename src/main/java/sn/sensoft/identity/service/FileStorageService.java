@@ -52,6 +52,12 @@ public class FileStorageService {
     // MÉTHODES PUBLIQUES
 
     @Transactional
+    public FileStorageResult saveFileWithType(CompletedFileUpload file, String sessionId, FileType fileType) throws IOException {
+        log.debug("Sauvegarde fichier avec type spécifique - Session: {}, Type: {}", sessionId, fileType);
+        return saveFileWithPdfSupport(file, sessionId, fileType);
+    }
+
+    @Transactional
     public FileStorageResult saveIdentityDocument(CompletedFileUpload file, String sessionId) throws IOException {
         log.debug("Sauvegarde document d'identité pour session: {}, fichier: {}", sessionId, file.getFilename());
         return saveFileWithPdfSupport(file, sessionId, FileType.IDENTITY_DOCUMENT);
@@ -159,7 +165,9 @@ public class FileStorageService {
 
             // Upload vers OpenKM avec le wrapper
             OpenKMService.OpenKMUploadResult uploadResult;
-            if (fileType == FileType.IDENTITY_DOCUMENT) {
+            if (fileType == FileType.IDENTITY_DOCUMENT ||
+                    fileType == FileType.IDENTITY_DOC_RECTO ||
+                    fileType == FileType.IDENTITY_DOC_VERSO) {
                 uploadResult = openKMService.uploadIdentityDocument(cachedFile);
             } else {
                 uploadResult = openKMService.uploadUserPhoto(cachedFile);
@@ -341,7 +349,9 @@ public class FileStorageService {
 
             // Upload vers OpenKM
             OpenKMService.OpenKMUploadResult uploadResult;
-            if (fileType == FileType.IDENTITY_DOCUMENT) {
+            if (fileType == FileType.IDENTITY_DOCUMENT ||
+                    fileType == FileType.IDENTITY_DOC_RECTO ||
+                    fileType == FileType.IDENTITY_DOC_VERSO) {
                 uploadResult = openKMService.uploadIdentityDocument(file);
             } else {
                 uploadResult = openKMService.uploadUserPhoto(file);

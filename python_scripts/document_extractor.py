@@ -25,6 +25,23 @@ except ImportError:
 # Cache global EasyOCR
 _EASYOCR_READER_CACHE = None
 
+def get_easyocr_reader():
+    """Récupère le reader EasyOCR global"""
+    global _EASYOCR_READER_CACHE
+
+    if _EASYOCR_READER_CACHE is None:
+        if EASYOCR_AVAILABLE:
+            print("Initialisation EasyOCR Reader")
+            import easyocr
+            _EASYOCR_READER_CACHE = easyocr.Reader(['en', 'fr'], gpu=False)
+            print("EasyOCR Reader initialisé et mis en cache")
+        else:
+            print("EasyOCR non disponible")
+            return None
+
+    return _EASYOCR_READER_CACHE
+
+
 class DocumentPatterns:
     """ patterns regex utilisés dans l'extraction"""
     # PATTERNS DE DATES
@@ -237,22 +254,6 @@ class DocumentPatterns:
             if match:
                 return key, match
         return None
-
-def get_easyocr_reader():
-    """Récupère le reader EasyOCR global"""
-    global _EASYOCR_READER_CACHE
-
-    if _EASYOCR_READER_CACHE is None:
-        if EASYOCR_AVAILABLE:
-            print("Initialisation EasyOCR Reader")
-            import easyocr
-            _EASYOCR_READER_CACHE = easyocr.Reader(['en', 'fr'], gpu=False)
-            print("EasyOCR Reader initialisé et mis en cache")
-        else:
-            print("EasyOCR non disponible")
-            return None
-
-    return _EASYOCR_READER_CACHE
 
 def normalize_text(text):
     """Normalise le texte"""
@@ -628,8 +629,7 @@ def extract_mrz_with_passporteye(image_path: str) -> Dict:
     try:
         mrz_data = read_mrz(image_path)
         if not mrz_data:
-            return {}
-
+            return {'status': 'error', 'error': 'Zone MRZ non détectée ou illisible'}
         data = {}
 
         if hasattr(mrz_data, 'number') and mrz_data.number:
@@ -667,7 +667,7 @@ def extract_mrz_with_passporteye(image_path: str) -> Dict:
         return data
 
     except Exception as e:
-        return {}
+        return {'status': 'error', 'error': f'Erreur extraction MRZ: {str(e)}'}
 
 
 def merge_data_without_duplicates(recto_data: Dict, verso_data: Dict) -> Dict:
@@ -796,8 +796,12 @@ def extract_senegalese_verso(text: str, image_path: str) -> Dict:
 
     # Extraction MRZ
     mrz_data = extract_mrz_with_passporteye(image_path)
-    if mrz_data:
-        data.update(mrz_data)
+    if not mrz_data or mrz_data.get('status') == 'error':
+        return {
+        'status': 'error',
+        'error': 'Zone MRZ obligatoire non détectée sur verso carte sénégalaise'
+            }
+    data.update(mrz_data)
 
     # Numéro d'électeur avec patterns
     if 'Foloctour' in text and '102694821' in text:
@@ -939,8 +943,12 @@ def extract_french_verso(text: str, image_path: str) -> Dict:
 
     # Extraction MRZ
     mrz_data = extract_mrz_with_passporteye(image_path)
-    if mrz_data:
-        data.update(mrz_data)
+    if not mrz_data or mrz_data.get('status') == 'error':
+        return {
+            'status': 'error',
+            'error': 'Zone MRZ obligatoire non détectée sur verso carte sénégalaise'
+        }
+    data.update(mrz_data)
 
     # Extraction de l'adresse avec patterns
     address_patterns = [
@@ -1091,9 +1099,11 @@ def extract_passport(image_path: str) -> Dict:
                 issuing_country = country_info['name']
 
         else:
-            if EASYOCR_AVAILABLE:
-                ocr_data = extract_passport_dates_and_info(text_combined)
-                mrz_data_dict.update(ocr_data)
+            return {
+                'status': 'error',
+                'error': 'Zone MRZ obligatoire non détectée dans le passeport',
+                'documentType': 'PASSPORT'
+            }
 
         # Fusionner les données
         final_data = merge_mrz_and_ocr_data_enhanced(mrz_data_dict, ocr_dates)

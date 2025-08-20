@@ -1,125 +1,259 @@
 package sn.sensoft.identity.service;
 
 import io.micronaut.context.annotation.Value;
+import io.micronaut.http.HttpRequest;
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.MediaType;
+import io.micronaut.http.client.HttpClient;
+import io.micronaut.http.client.annotation.Client;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import io.micronaut.serde.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.URI;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 @Singleton
 public class DocumentExtractionService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentExtractionService.class);
 
-    private final String pythonExtractionScriptPath;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final String aiServerBaseUrl;
+    private final Duration timeout;
 
-    public DocumentExtractionService(@Value("${app.document-extraction.python-script-path}") String pythonExtractionScriptPath,
-                                     ObjectMapper objectMapper) {
-        this.pythonExtractionScriptPath = pythonExtractionScriptPath;
+    @Inject
+    public DocumentExtractionService(@Client("ai-server") HttpClient httpClient,
+                                     ObjectMapper objectMapper,
+                                     @Value("${app.ai-server.base-url:http://localhost:5000}") String aiServerBaseUrl,
+                                     @Value("${app.ai-server.timeout:60s}") Duration timeout) {
+        this.httpClient = httpClient;
         this.objectMapper = objectMapper;
-        log.info("DocumentExtractionService initialisé avec script: {}", pythonExtractionScriptPath);
+        this.aiServerBaseUrl = aiServerBaseUrl;
+        this.timeout = timeout;
+
+        log.info("DocumentExtractionService initialisé avec serveur IA: {} (timeout: {})",
+                aiServerBaseUrl, timeout);
+
+        // Test de connexion au démarrage
+        testAIServerConnection();
     }
 
     /**
-     * Extraction d'un document unique
+     * Test de connexion au serveur IA au démarrage
      */
-    public DocumentExtractionResult extractDocumentData(String imagePath) throws IOException, InterruptedException {
-        log.debug("Début extraction document pour image: {}", imagePath);
-
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "python", pythonExtractionScriptPath, imagePath
-        );
-
-        Process process = processBuilder.start();
-        boolean finished = process.waitFor(300, TimeUnit.SECONDS); // 5 MIN DE TIMEOUT
-
-        if (!finished) {
-            log.error("Timeout extraction document après 300 secondes pour image: {}", imagePath);
-            process.destroyForcibly();
-            throw new RuntimeException("Document extraction timeout after 300 seconds");
-        }
-
-        String output = new String(process.getInputStream().readAllBytes());
-        String errorOutput = new String(process.getErrorStream().readAllBytes());
-
-        log.debug("Code de sortie extraction: {} pour image: {}", process.exitValue(), imagePath);
-
-        if (process.exitValue() != 0) {
-            log.error("Échec script Python extraction pour image: {}. Error: {}. Output: {}",
-                    imagePath, errorOutput, output);
-            throw new RuntimeException("Python extraction script failed. Error: " + errorOutput + ". Output: " + output);
-        }
-
-        log.info("Extraction document réussie pour image: {}", imagePath);
-        return parseExtractionResult(output);
-    }
-
-    /**
-     * Extraction recto/verso pour cartes d'identité
-     */
-    public DocumentExtractionResult extractRectoVersoData(String rectoPath, String versoPath)
-            throws IOException, InterruptedException {
-
-        log.debug("Début extraction recto/verso - Recto: {}, Verso: {}", rectoPath, versoPath);
-
-        // Appeler le script Python avec les deux fichiers
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "python", pythonExtractionScriptPath, rectoPath, versoPath
-        );
-
-        Process process = processBuilder.start();
-        boolean finished = process.waitFor(300, TimeUnit.SECONDS); // 5 MIN DE TIMEOUT
-
-        if (!finished) {
-            log.error("Timeout extraction recto/verso après 300 secondes - Recto: {}, Verso: {}",
-                    rectoPath, versoPath);
-            process.destroyForcibly();
-            throw new RuntimeException("Recto/Verso extraction timeout after 300 seconds");
-        }
-
-        String output = new String(process.getInputStream().readAllBytes());
-        String errorOutput = new String(process.getErrorStream().readAllBytes());
-
-        log.debug("Code de sortie extraction recto/verso: {} - Recto: {}, Verso: {}",
-                process.exitValue(), rectoPath, versoPath);
-
-        if (process.exitValue() != 0) {
-            log.error("Échec script Python extraction recto/verso - Recto: {}, Verso: {}. Error: {}. Output: {}",
-                    rectoPath, versoPath, errorOutput, output);
-            throw new RuntimeException("Python recto/verso extraction script failed. Error: " + errorOutput + ". Output: " + output);
-        }
-
-        log.info("Extraction recto/verso réussie - Recto: {}, Verso: {}", rectoPath, versoPath);
-        return parseExtractionResult(output);
-    }
-
-    /**
-     * Parsing du résultat JSON
-     */
-    private DocumentExtractionResult parseExtractionResult(String output) throws IOException {
+    private void testAIServerConnection() {
         try {
-            log.debug("Parsing résultat extraction document");
+            log.debug("Test connexion serveur IA...");
 
-            // JSON multi-lignes
-            // Cherche le JSON complet
-            int startIndex = output.indexOf('{');
-            int endIndex = output.lastIndexOf('}');
+            HttpRequest<Object> request = HttpRequest.GET(aiServerBaseUrl + "/health")
+                    .header("Accept", MediaType.APPLICATION_JSON);
 
-            if (startIndex == -1 || endIndex == -1 || startIndex >= endIndex) {
-                log.error("Aucun JSON valide trouvé dans la sortie extraction: {}", output);
-                throw new IOException("No valid JSON found in extraction output: " + output);
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            if (response.getStatus().getCode() == 200) {
+                log.info("Connexion serveur IA réussie");
+
+                // Log des détails si disponibles
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> healthData = objectMapper.readValue(response.body(), Map.class);
+                    log.info("Serveur IA - Modèles chargés: {}, DeepFace: {}, EasyOCR: {}",
+                            healthData.get("models_loaded"),
+                            healthData.get("deepface_ready"),
+                            healthData.get("easyocr_ready"));
+                } catch (Exception e) {
+                    log.debug("Impossible de parser les détails de santé: {}", e.getMessage());
+                }
+            } else {
+                log.warn("Serveur IA répond mais status: {}", response.getStatus());
+            }
+        } catch (Exception e) {
+            log.error("Erreur connexion serveur IA: {}", e.getMessage());
+            log.warn("Le serveur IA n'est peut-être pas encore démarré. Vérifiez qu'il tourne sur: {}", aiServerBaseUrl);
+        }
+    }
+
+    /**
+     * Extraction d'un document via serveur HTTP
+     */
+    public DocumentExtractionResult extractDocumentData(String imagePath) throws IOException {
+        return extractDocumentData(imagePath, null);
+    }
+
+    /**
+     * Extraction d'un côté spécifié via serveur HTTP
+     */
+    public DocumentExtractionResult extractDocumentData(String imagePath, String expectedSide) throws IOException {
+        log.debug("Début extraction document via HTTP - Image: {}, Côté: {}", imagePath, expectedSide);
+
+        try {
+            // Préparer la requête
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("image_path", imagePath);
+            if (expectedSide != null) {
+                requestBody.put("expected_side", expectedSide);
             }
 
-            String jsonContent = output.substring(startIndex, endIndex + 1);
-            log.debug("JSON extrait pour document: {}", jsonContent);
+            HttpRequest<Map<String, Object>> request = HttpRequest.POST(aiServerBaseUrl + "/extract/document", requestBody)
+                    .header("Content-Type", MediaType.APPLICATION_JSON)
+                    .header("Accept", MediaType.APPLICATION_JSON);
+
+            log.debug("Envoi requête extraction vers: {}", aiServerBaseUrl + "/extract/document");
+
+            // Exécuter la requête avec timeout
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            log.debug("Réponse extraction reçue - Status: {}", response.getStatus());
+
+            if (response.getStatus().getCode() != 200) {
+                String errorMsg = String.format("Erreur serveur IA - Status: %d, Body: %s",
+                        response.getStatus().getCode(), response.body());
+                log.error(errorMsg);
+                throw new IOException(errorMsg);
+            }
+
+            // Parser la réponse
+            DocumentExtractionResult result = parseExtractionResult(response.body());
+
+            if (result.isSuccessful()) {
+                log.info("Extraction document réussie via HTTP - Type: {}, Pays: {}",
+                        result.getDocumentType(), result.getIssuingCountry());
+            } else {
+                log.warn("Extraction document échouée via HTTP: {}", result.getError());
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur extraction document via HTTP pour image {}: {}", imagePath, e.getMessage(), e);
+            throw new IOException("Erreur extraction HTTP: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Extraction recto/verso pour cartes d'identité via serveur HTTP
+     */
+    public DocumentExtractionResult extractRectoVersoData(String rectoPath, String versoPath) throws IOException {
+        log.debug("Début extraction recto/verso via HTTP - Recto: {}, Verso: {}", rectoPath, versoPath);
+
+        try {
+            // Préparer la requête
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("recto_path", rectoPath);
+            requestBody.put("verso_path", versoPath);
+
+            HttpRequest<Map<String, Object>> request = HttpRequest.POST(aiServerBaseUrl + "/extract/recto-verso", requestBody)
+                    .header("Content-Type", MediaType.APPLICATION_JSON)
+                    .header("Accept", MediaType.APPLICATION_JSON);
+
+            log.debug("Envoi requête recto/verso vers: {}", aiServerBaseUrl + "/extract/recto-verso");
+
+            // Exécuter la requête
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            log.debug("Réponse recto/verso reçue - Status: {}", response.getStatus());
+
+            if (response.getStatus().getCode() != 200) {
+                String errorMsg = String.format("Erreur serveur IA recto/verso - Status: %d, Body: %s",
+                        response.getStatus().getCode(), response.body());
+                log.error(errorMsg);
+                throw new IOException(errorMsg);
+            }
+
+            // Parser la réponse
+            DocumentExtractionResult result = parseExtractionResult(response.body());
+
+            if (result.isSuccessful()) {
+                log.info("Extraction recto/verso réussie via HTTP - Type: {}, Pays: {}",
+                        result.getDocumentType(), result.getIssuingCountry());
+            } else {
+                log.warn("Extraction recto/verso échouée via HTTP: {}", result.getError());
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur extraction recto/verso via HTTP - Recto: {}, Verso: {}: {}",
+                    rectoPath, versoPath, e.getMessage(), e);
+            throw new IOException("Erreur extraction recto/verso HTTP: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Vérification de l'etat du serveur IA
+     */
+    public boolean isAIServerHealthy() {
+        try {
+            HttpRequest<Object> request = HttpRequest.GET(aiServerBaseUrl + "/health")
+                    .header("Accept", MediaType.APPLICATION_JSON);
+
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            boolean healthy = response.getStatus().getCode() == 200;
+
+            if (healthy) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> healthData = objectMapper.readValue(response.body(), Map.class);
+                    healthy = "healthy".equals(healthData.get("status")) &&
+                            Boolean.TRUE.equals(healthData.get("models_loaded"));
+                } catch (Exception e) {
+                    log.debug("Erreur parsing santé: {}", e.getMessage());
+                }
+            }
+
+            return healthy;
+
+        } catch (Exception e) {
+            log.debug("Erreur vérification santé serveur IA: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * pour avoir le statut détaillé du serveur IA
+     */
+    public Map<String, Object> getAIServerStatus() {
+        try {
+            HttpRequest<Object> request = HttpRequest.GET(aiServerBaseUrl + "/status")
+                    .header("Accept", MediaType.APPLICATION_JSON);
+
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            if (response.getStatus().getCode() == 200) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> status = objectMapper.readValue(response.body(), Map.class);
+                return status;
+            }
+
+        } catch (Exception e) {
+            log.debug("Erreur récupération statut serveur IA: {}", e.getMessage());
+        }
+
+        return Map.of("status", "unavailable", "error", "Serveur IA non accessible");
+    }
+
+    /**
+     * Parse le résultat JSON de l'extraction
+     */
+    private DocumentExtractionResult parseExtractionResult(String jsonResponse) throws IOException {
+        try {
+            log.debug("Parsing réponse extraction document");
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> jsonNode = objectMapper.readValue(jsonContent, Map.class);
+            Map<String, Object> jsonNode = objectMapper.readValue(jsonResponse, Map.class);
 
             DocumentExtractionResult result = new DocumentExtractionResult();
             result.setStatus((String) jsonNode.get("status"));
@@ -129,7 +263,7 @@ public class DocumentExtractionService {
                 result.setIssuingCountry((String) jsonNode.get("issuingCountry"));
                 result.setConfidence((String) jsonNode.get("confidence"));
 
-                log.info("Document extrait avec succès - Type: {}, Pays: {}, Confiance: {}",
+                log.debug("Document extrait avec succès - Type: {}, Pays: {}, Confiance: {}",
                         result.getDocumentType(), result.getIssuingCountry(), result.getConfidence());
 
                 // Extraction des données du document
@@ -164,17 +298,22 @@ public class DocumentExtractionService {
             } else {
                 result.setError((String) jsonNode.get("error"));
                 log.warn("Échec extraction document: {}", result.getError());
+
+                // Log traceback si disponible pour debug
+                if (jsonNode.containsKey("traceback")) {
+                    log.debug("Traceback serveur IA: {}", jsonNode.get("traceback"));
+                }
             }
 
             return result;
         } catch (Exception e) {
-            log.error("Erreur parsing résultat extraction: {}", output, e);
-            throw new IOException("Failed to parse extraction script output: " + output, e);
+            log.error("Erreur parsing réponse extraction: {}", jsonResponse, e);
+            throw new IOException("Erreur parsing réponse serveur IA: " + jsonResponse, e);
         }
     }
 
     /**
-     * Classe de résultat enrichie
+     * Classe de résultat
      */
     public static class DocumentExtractionResult {
         private String status;
@@ -187,7 +326,7 @@ public class DocumentExtractionService {
         private Map<String, Object> versoData;
         private String error;
 
-        // Getters et Setters
+        // Getters et Setters (identiques à la version précédente)
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
 
@@ -219,31 +358,21 @@ public class DocumentExtractionService {
         public Map<String, Object> getVersoData() { return versoData; }
         public void setVersoData(Map<String, Object> versoData) { this.versoData = versoData; }
 
-        /**
-         * Méthode utilitaire pour vérifier si c'est une extraction recto/verso
-         */
         public boolean isRectoVersoExtraction() {
             return "BOTH".equals(side) && rectoData != null && versoData != null;
         }
 
-        /**
-         * Méthode utilitaire pour obtenir toutes les données combinées
-         */
         public Map<String, Object> getAllExtractedData() {
             if (extractedData != null) {
-                return extractedData; // Données déjà fusionnées
+                return extractedData;
             }
-
-            // Si pas de données fusionnées, retourner les données du côté principal
             if (rectoData != null) {
                 return rectoData;
             }
-
             if (versoData != null) {
                 return versoData;
             }
-
-            return java.util.Map.of(); // Map vide
+            return java.util.Map.of();
         }
     }
 }

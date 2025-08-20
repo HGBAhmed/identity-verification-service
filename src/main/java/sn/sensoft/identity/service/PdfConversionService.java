@@ -26,22 +26,22 @@ public class PdfConversionService {
     private static final Logger log = LoggerFactory.getLogger(PdfConversionService.class);
 
     private final String tempPath;
-    private final float dpi;
+    private final float defaultDpi;
     private final String outputFormat;
 
     public PdfConversionService(@Value("${app.file-storage.temp-path}") String tempPath,
-                                @Value("${app.pdf-conversion.dpi:300}") float dpi,
+                                @Value("${app.pdf-conversion.dpi:300}") float defaultDpi,
                                 @Value("${app.pdf-conversion.output-format:jpg}") String outputFormat) {
         this.tempPath = tempPath;
-        this.dpi = dpi;
+        this.defaultDpi = defaultDpi;
         this.outputFormat = outputFormat.toLowerCase();
 
-        log.info("PdfConversionService initialisé - DPI: {}, Format: {}, Temp: {}", dpi, outputFormat, tempPath);
+        log.info("PdfConversionService initialisé - DPI par défaut: {}, Format: {}, Temp: {}", defaultDpi, outputFormat, tempPath);
         createTempDirectory();
     }
 
     /**
-     * Convertit un PDF en image (première page)
+     * Convertit un PDF en image (première page) avec DPI adaptatif
      */
     public PdfConversionResult convertPdfToImage(CompletedFileUpload pdfFile) throws IOException {
         log.debug("Début conversion PDF vers image - Fichier: {}, Taille: {} bytes",
@@ -50,6 +50,11 @@ public class PdfConversionService {
         if (pdfFile.getSize() == 0) {
             throw new IOException("Fichier PDF vide");
         }
+
+        // Choisir le DPI optimal basé sur la taille du fichier
+        float adaptiveDpi = chooseDpiForFile(pdfFile);
+        log.info("DPI adaptatif choisi: {} pour fichier {} ({} bytes)",
+                adaptiveDpi, pdfFile.getFilename(), pdfFile.getSize());
 
         try (PDDocument document = Loader.loadPDF(pdfFile.getBytes())) {
 
@@ -60,12 +65,12 @@ public class PdfConversionService {
                 throw new IOException("Document PDF sans pages");
             }
 
-            // Convertir la première page
+            // Convertir la première page avec le DPI adaptatif
             PDFRenderer renderer = new PDFRenderer(document);
-            BufferedImage image = renderer.renderImageWithDPI(0, dpi); // Page 0 = première page
+            BufferedImage image = renderer.renderImageWithDPI(0, adaptiveDpi); // Page 0 = première page
 
             log.debug("Page convertie - Dimensions: {}x{}, DPI: {}",
-                    image.getWidth(), image.getHeight(), dpi);
+                    image.getWidth(), image.getHeight(), adaptiveDpi);
 
             // Validation de l'image convertie
             validateConvertedImage(image);
@@ -76,20 +81,40 @@ public class PdfConversionService {
             // Créer un nouveau CompletedFileUpload simulé
             ConvertedImageFile convertedFile = new ConvertedImageFile(tempFilePath, outputFormat);
 
-            log.info("Conversion PDF réussie - Fichier: {} → {}, Dimensions: {}x{}",
-                    pdfFile.getFilename(), tempFilePath, image.getWidth(), image.getHeight());
+            log.info("Conversion PDF réussie - Fichier: {} → {}, Dimensions: {}x{}, DPI: {}",
+                    pdfFile.getFilename(), tempFilePath, image.getWidth(), image.getHeight(), adaptiveDpi);
 
             return PdfConversionResult.success(
                     convertedFile,
                     tempFilePath,
                     image.getWidth(),
                     image.getHeight(),
-                    pageCount
+                    pageCount,
+                    adaptiveDpi
             );
 
         } catch (IOException e) {
             log.error("Erreur conversion PDF: {} - {}", pdfFile.getFilename(), e.getMessage(), e);
             throw new IOException("Erreur conversion PDF: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Choisit le DPI optimal basé sur la taille du fichier PDF
+     */
+    private float chooseDpiForFile(CompletedFileUpload file) {
+        long fileSize = file.getSize();
+
+        // Logique adaptative basée sur la taille
+        if (fileSize > 500_000) { // > 500KB = bonne qualité originale
+            log.debug("Fichier de bonne qualité détecté ({}KB), utilisation 150 DPI", fileSize / 1024);
+            return 150f; // DPI bas pour éviter le sur-échantillonnage
+        } else if (fileSize > 100_000) { // 100KB - 500KB = qualité moyenne
+            log.debug("Fichier de qualité moyenne détecté ({}KB), utilisation 200 DPI", fileSize / 1024);
+            return 200f; // DPI moyen - compromis
+        } else { // < 100KB = probablement compressé/mauvaise qualité
+            log.debug("Fichier de faible qualité détecté ({}KB), utilisation 300 DPI", fileSize / 1024);
+            return 300f; // DPI élevé pour compenser la qualité
         }
     }
 
@@ -220,28 +245,36 @@ public class PdfConversionService {
         private final int imageWidth;
         private final int imageHeight;
         private final int pdfPageCount;
+        private final float usedDpi; // Nouveau champ pour tracer le DPI utilisé
         private final String error;
 
         private PdfConversionResult(boolean success, ConvertedImageFile convertedFile,
                                     String tempFilePath, int imageWidth, int imageHeight,
-                                    int pdfPageCount, String error) {
+                                    int pdfPageCount, float usedDpi, String error) {
             this.success = success;
             this.convertedFile = convertedFile;
             this.tempFilePath = tempFilePath;
             this.imageWidth = imageWidth;
             this.imageHeight = imageHeight;
             this.pdfPageCount = pdfPageCount;
+            this.usedDpi = usedDpi;
             this.error = error;
         }
 
         public static PdfConversionResult success(ConvertedImageFile convertedFile, String tempFilePath,
-                                                  int imageWidth, int imageHeight, int pdfPageCount) {
+                                                  int imageWidth, int imageHeight, int pdfPageCount, float usedDpi) {
             return new PdfConversionResult(true, convertedFile, tempFilePath,
-                    imageWidth, imageHeight, pdfPageCount, null);
+                    imageWidth, imageHeight, pdfPageCount, usedDpi, null);
+        }
+
+        // Méthode de compatibilité
+        public static PdfConversionResult success(ConvertedImageFile convertedFile, String tempFilePath,
+                                                  int imageWidth, int imageHeight, int pdfPageCount) {
+            return success(convertedFile, tempFilePath, imageWidth, imageHeight, pdfPageCount, 0f);
         }
 
         public static PdfConversionResult error(String error) {
-            return new PdfConversionResult(false, null, null, 0, 0, 0, error);
+            return new PdfConversionResult(false, null, null, 0, 0, 0, 0f, error);
         }
 
         // Getters
@@ -251,6 +284,7 @@ public class PdfConversionService {
         public int getImageWidth() { return imageWidth; }
         public int getImageHeight() { return imageHeight; }
         public int getPdfPageCount() { return pdfPageCount; }
+        public float getUsedDpi() { return usedDpi; } // Nouveau getter
         public String getError() { return error; }
     }
 

@@ -64,7 +64,7 @@ def compare_faces(img1_path, img2_path, custom_threshold=None):
         is_verified = result['distance'] <= threshold_to_use
 
         return {
-            'verified': result['verified'],
+            'verified': is_verified,
             'distance': result['distance'],
             'confidence': 1 - result['distance'],
             'threshold': threshold_to_use,

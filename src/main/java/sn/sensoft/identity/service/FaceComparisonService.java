@@ -1,134 +1,233 @@
 package sn.sensoft.identity.service;
 
 import io.micronaut.context.annotation.Value;
+import io.micronaut.http.HttpRequest;
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.MediaType;
+import io.micronaut.http.client.HttpClient;
+import io.micronaut.http.client.annotation.Client;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import io.micronaut.serde.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 @Singleton
 public class FaceComparisonService {
 
     private static final Logger log = LoggerFactory.getLogger(FaceComparisonService.class);
 
-    private final String pythonScriptPath;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final String aiServerBaseUrl;
+    private final Duration timeout;
+    private final double defaultThreshold;
 
-    @Value("${app.face-comparison.default-threshold:0.68}")
-    private double defaultThreshold;
-
-    public FaceComparisonService(@Value("${app.face-comparison.python-script-path}") String pythonScriptPath,
-                                 ObjectMapper objectMapper) {
-        this.pythonScriptPath = pythonScriptPath;
+    @Inject
+    public FaceComparisonService(@Client("ai-server") HttpClient httpClient,
+                                 ObjectMapper objectMapper,
+                                 @Value("${app.ai-server.base-url:http://localhost:5000}") String aiServerBaseUrl,
+                                 @Value("${app.ai-server.timeout:60s}") Duration timeout,
+                                 @Value("${app.face-comparison.default-threshold:0.68}") double defaultThreshold) {
+        this.httpClient = httpClient;
         this.objectMapper = objectMapper;
-        log.info("FaceComparisonService initialisé avec script: {}", pythonScriptPath);
+        this.aiServerBaseUrl = aiServerBaseUrl;
+        this.timeout = timeout;
+        this.defaultThreshold = defaultThreshold;
+
+        log.info("FaceComparisonService initialisé avec serveur IA: {} (seuil: {}, timeout: {})",
+                aiServerBaseUrl, defaultThreshold, timeout);
     }
 
+    /**
+     * Compare deux images avec seuil donné via serveur HTTP
+     */
     public FaceComparisonResult compareImages(String imagePath1, String imagePath2, Double customThreshold)
-            throws IOException, InterruptedException {
+            throws IOException {
 
         double thresholdToUse = customThreshold != null ? customThreshold : defaultThreshold;
 
-        log.debug("Début comparaison faciale entre: {} et {} avec seuil: {}", imagePath1, imagePath2, thresholdToUse);
+        log.debug("Début comparaison faciale via HTTP - Image1: {}, Image2: {}, Seuil: {}",
+                imagePath1, imagePath2, thresholdToUse);
 
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "python", pythonScriptPath, imagePath1, imagePath2, String.valueOf(thresholdToUse)
-        );
+        try {
+            // Préparer la requête
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("img1_path", imagePath1);
+            requestBody.put("img2_path", imagePath2);
+            requestBody.put("threshold", thresholdToUse);
 
-        Process process = processBuilder.start();
-        boolean finished = process.waitFor(300, TimeUnit.SECONDS); // 5 minutes
+            HttpRequest<Map<String, Object>> request = HttpRequest.POST(aiServerBaseUrl + "/compare/faces", requestBody)
+                    .header("Content-Type", MediaType.APPLICATION_JSON)
+                    .header("Accept", MediaType.APPLICATION_JSON);
 
-        if (!finished) {
-            log.error("Timeout comparaison faciale après 300 secondes pour images: {} et {}",
-                    imagePath1, imagePath2);
-            process.destroyForcibly();
-            throw new RuntimeException("Face comparison timeout after 300 seconds");
+            log.debug("Envoi requête comparaison vers: {}", aiServerBaseUrl + "/compare/faces");
+
+            // Exécuter la requête
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            log.debug("Réponse comparaison reçue - Status: {}", response.getStatus());
+
+            if (response.getStatus().getCode() != 200) {
+                String errorMsg = String.format("Erreur serveur IA comparaison - Status: %d, Body: %s",
+                        response.getStatus().getCode(), response.body());
+                log.error(errorMsg);
+                throw new IOException(errorMsg);
+            }
+
+            // Parser la réponse
+            FaceComparisonResult result = parseComparisonResult(response.body());
+
+            log.info("Comparaison faciale terminée via HTTP - Vérifié: {}, Confiance: {:.3f}, Seuil: {:.3f}, Personnalisé: {}",
+                    result.isVerified(), result.getConfidence(), result.getThreshold(), result.isCustomThresholdUsed());
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Erreur comparaison faciale via HTTP - Image1: {}, Image2: {}: {}",
+                    imagePath1, imagePath2, e.getMessage(), e);
+            throw new IOException("Erreur comparaison HTTP: " + e.getMessage(), e);
         }
-
-        String output = new String(process.getInputStream().readAllBytes());
-        String errorOutput = new String(process.getErrorStream().readAllBytes());
-
-        log.debug("Code de sortie comparaison: {} pour images: {} et {}",
-                process.exitValue(), imagePath1, imagePath2);
-
-        if (process.exitValue() != 0) {
-            log.error("Échec script Python comparaison pour images: {} et {}. Error: {}. Output: {}",
-                    imagePath1, imagePath2, errorOutput, output);
-            throw new RuntimeException("Python script failed. Error: " + errorOutput + ". Output: " + output);
-        }
-
-        log.info("Comparaison faciale réussie pour images: {} et {} avec seuil: {}", imagePath1, imagePath2, thresholdToUse);
-        return parseComparisonResult(output);
     }
 
-    // Garder la méthode existante pour compatibilité
-    public FaceComparisonResult compareImages(String imagePath1, String imagePath2)
-            throws IOException, InterruptedException {
+    /**
+     * Compare deux images avec seuil par défaut
+     */
+    public FaceComparisonResult compareImages(String imagePath1, String imagePath2) throws IOException {
         return compareImages(imagePath1, imagePath2, null);
     }
 
-    private FaceComparisonResult parseComparisonResult(String output) throws IOException {
+    /**
+     * Teste la disponibilité du service de comparaison faciale
+     */
+    public boolean isFaceComparisonServiceAvailable() {
         try {
-            log.debug("Parsing résultat comparaison faciale");
+            // Utiliser l'endpoint de santé pour vérifier que DeepFace est prêt
+            HttpRequest<Object> request = HttpRequest.GET(aiServerBaseUrl + "/health")
+                    .header("Accept", MediaType.APPLICATION_JSON);
 
-            // Extraire seulement la dernière ligne (le JSON)
-            String[] lines = output.trim().split("\\r?\\n");
-            String jsonLine = "";
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
 
-            // Chercher la ligne qui contient le JSON (commence par {)
-            for (String line : lines) {
-                if (line.trim().startsWith("{")) {
-                    jsonLine = line.trim();
+            if (response.getStatus().getCode() == 200) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> healthData = objectMapper.readValue(response.body(), Map.class);
+                    return Boolean.TRUE.equals(healthData.get("deepface_ready"));
+                } catch (Exception e) {
+                    log.debug("Erreur parsing santé DeepFace: {}", e.getMessage());
+                    return false;
                 }
             }
 
-            if (jsonLine.isEmpty()) {
-                log.error("Aucun JSON trouvé dans la sortie: {}", output);
-                throw new IOException("No JSON found in output: " + output);
+            return false;
+
+        } catch (Exception e) {
+            log.debug("Erreur vérification service comparaison faciale: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * pour les métriques de performance du service
+     */
+    public Map<String, Object> getPerformanceMetrics() {
+        try {
+            HttpRequest<Object> request = HttpRequest.GET(aiServerBaseUrl + "/status")
+                    .header("Accept", MediaType.APPLICATION_JSON);
+
+            HttpResponse<String> response = httpClient.toBlocking()
+                    .exchange(request, String.class);
+
+            if (response.getStatus().getCode() == 200) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> status = objectMapper.readValue(response.body(), Map.class);
+
+                // Extraire les métriques pertinentes
+                Map<String, Object> metrics = new HashMap<>();
+                metrics.put("server_status", status.get("status"));
+                metrics.put("uptime", status.get("uptime"));
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> models = (Map<String, Object>) status.get("models");
+                if (models != null) {
+                    metrics.put("deepface_ready", models.get("deepface_ready"));
+                    metrics.put("models_loaded", models.get("loaded"));
+                }
+
+                return metrics;
             }
 
-            log.debug("JSON extrait pour comparaison: {}", jsonLine);
+        } catch (Exception e) {
+            log.debug("Erreur récupération métriques: {}", e.getMessage());
+        }
+
+        return Map.of("status", "unavailable");
+    }
+
+    /**
+     * Parse le résultat JSON de la comparaison faciale
+     */
+    private FaceComparisonResult parseComparisonResult(String jsonResponse) throws IOException {
+        try {
+            log.debug("Parsing résultat comparaison faciale");
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> jsonNode = objectMapper.readValue(jsonLine, Map.class);
+            Map<String, Object> jsonNode = objectMapper.readValue(jsonResponse, Map.class);
 
             FaceComparisonResult result = new FaceComparisonResult();
+
+            // Gestion des erreurs
+            if ("error".equals(jsonNode.get("status")) || jsonNode.containsKey("error")) {
+                result.setVerified(false);
+                result.setConfidence(0.0);
+                result.setStatus("error");
+                result.setError((String) jsonNode.get("error"));
+
+                // Log traceback si disponible pour debug
+                if (jsonNode.containsKey("traceback")) {
+                    log.debug("Traceback serveur IA comparaison: {}", jsonNode.get("traceback"));
+                }
+
+                log.warn("Erreur comparaison faciale serveur IA: {}", result.getError());
+                return result;
+            }
+
+            // Résultat de succès
             result.setVerified((Boolean) jsonNode.get("verified"));
             result.setConfidence(((Number) jsonNode.get("confidence")).doubleValue());
             result.setStatus((String) jsonNode.get("status"));
 
             if (jsonNode.containsKey("threshold")) {
                 result.setThreshold(((Number) jsonNode.get("threshold")).doubleValue());
-                log.debug("Seuil utilisé: {}", result.getThreshold());
             }
             if (jsonNode.containsKey("default_threshold")) {
                 result.setDefaultThreshold(((Number) jsonNode.get("default_threshold")).doubleValue());
-                log.debug("Seuil par défaut: {}", result.getDefaultThreshold());
             }
             if (jsonNode.containsKey("custom_threshold_used")) {
                 result.setCustomThresholdUsed((Boolean) jsonNode.get("custom_threshold_used"));
-                log.debug("Seuil personnalisé utilisé: {}", result.isCustomThresholdUsed());
             }
 
-            log.info("Comparaison faciale terminée - Vérifié: {}, Confiance: {:.3f}, Seuil: {:.3f}, Seuil personnalisé: {}",
-                    result.isVerified(), result.getConfidence(), result.getThreshold(), result.isCustomThresholdUsed());
-
-            if (jsonNode.containsKey("error")) {
-                result.setError((String) jsonNode.get("error"));
-                log.warn("Erreur dans comparaison faciale: {}", result.getError());
-            }
+            log.debug("Comparaison faciale parsée - Vérifié: {}, Confiance: {:.3f}, Seuil: {:.3f}",
+                    result.isVerified(), result.getConfidence(), result.getThreshold());
 
             return result;
+
         } catch (Exception e) {
-            log.error("Erreur parsing résultat comparaison faciale: {}", output, e);
-            throw new IOException("Failed to parse Python script output: " + output, e);
+            log.error("Erreur parsing résultat comparaison faciale: {}", jsonResponse, e);
+            throw new IOException("Erreur parsing réponse serveur IA comparaison: " + jsonResponse, e);
         }
     }
 
+    /**
+     * Classe de résultat
+     */
     public static class FaceComparisonResult {
         private boolean verified;
         private double confidence;

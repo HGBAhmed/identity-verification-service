@@ -189,7 +189,7 @@ public class IdentityVerificationService {
 
             // Sauvegarder les fichiers
             log.debug("Sauvegarde fichier recto pour session: {}", sessionId);
-            FileStorageService.FileStorageResult rectoResult = fileStorageService.saveIdentityDocument(rectoDocument, sessionId);
+            FileStorageService.FileStorageResult rectoResult = fileStorageService.saveFileWithType(rectoDocument, sessionId, FileType.IDENTITY_DOC_RECTO);
             if (!rectoResult.isSuccess()) {
                 log.error("Erreur sauvegarde recto pour session {}: {}", sessionId, rectoResult.getError());
                 return DocumentProcessingResult.error("Erreur sauvegarde recto: " + rectoResult.getError());
@@ -197,7 +197,7 @@ public class IdentityVerificationService {
             rectoFileId = rectoResult.getFileId();
 
             log.debug("Sauvegarde fichier verso pour session: {}", sessionId);
-            FileStorageService.FileStorageResult versoResult = fileStorageService.saveIdentityDocument(versoDocument, sessionId);
+            FileStorageService.FileStorageResult versoResult = fileStorageService.saveFileWithType(versoDocument, sessionId, FileType.IDENTITY_DOC_VERSO);
             if (!versoResult.isSuccess()) {
                 log.error("Erreur sauvegarde verso pour session {}: {}", sessionId, versoResult.getError());
                 return DocumentProcessingResult.error("Erreur sauvegarde verso: " + versoResult.getError());
@@ -213,8 +213,8 @@ public class IdentityVerificationService {
 
             try {
                 // Récupérer les chemins pour traitement
-                String rectoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
-                String versoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOCUMENT);
+                String rectoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOC_RECTO);
+                String versoPath = fileStorageService.getFilePathForProcessing(sessionId, FileType.IDENTITY_DOC_VERSO);
 
                 // Utiliser la nouvelle méthode d'extraction recto/verso
                 extraction = documentExtractionService.extractRectoVersoData(rectoPath, versoPath);
@@ -593,7 +593,20 @@ public class IdentityVerificationService {
             log.debug("Photo sauvegardée avec succès: {} pour document: {}", photoFileId, documentId);
 
             log.debug("Début comparaison faciale pour document: {} avec seuil: {}", documentId, threshold);
-            String docPath = fileStorageService.getFilePathForProcessing(documentId, FileType.IDENTITY_DOCUMENT);
+            String docPath = null;
+            VerificationFile docFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOC_RECTO);
+            if (docFile == null) {
+                docFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOC_VERSO);
+            }
+            if (docFile == null) {
+                docFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOCUMENT);
+            }
+
+            if (docFile == null) {
+                throw new RuntimeException("Aucun document trouvé pour la session: " + documentId);
+            }
+
+            docPath = fileStorageService.getFilePathForProcessing(documentId, docFile.getFileType());
             String photoPath = fileStorageService.getFilePathForProcessing(documentId, FileType.USER_PHOTO);
 
             FaceComparisonService.FaceComparisonResult faceComparison =
@@ -614,7 +627,13 @@ public class IdentityVerificationService {
                     session.getIssuingCountry()
             );
 
-            VerificationFile documentFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOCUMENT);
+            VerificationFile documentFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOC_RECTO);
+            if (documentFile == null) {
+                documentFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOC_VERSO);
+            }
+            if (documentFile == null) {
+                documentFile = fileStorageService.getFileMetadata(documentId, FileType.IDENTITY_DOCUMENT);
+            }
             UUID documentFileId = documentFile != null ? documentFile.getId() : null;
 
             resultService.saveVerificationResult(result, documentId, documentFileId, photoFileId);
