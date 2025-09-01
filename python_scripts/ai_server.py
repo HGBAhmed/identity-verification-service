@@ -57,17 +57,17 @@ class AIModelManager:
             start_time = time.time()
 
             try:
-                # 1. Initialiser DeepFace
+                #  Initialiser DeepFace
                 logger.info(" Initialisation DeepFace...")
                 self._initialize_deepface()
                 logger.info(" DeepFace initialisé")
 
-                # 2. Initialiser EasyOCR
+                # Initialiser EasyOCR
                 logger.info(" Initialisation EasyOCR...")
                 self._initialize_easyocr()
                 logger.info(" EasyOCR initialisé")
 
-                # 3. Autres initialisations
+                # Autres initialisations
                 logger.info(" Vérification autres dépendances...")
                 self._initialize_others()
                 logger.info(" Autres dépendances vérifiées")
@@ -84,13 +84,13 @@ class AIModelManager:
                 logger.warning(" Serveur en mode dégradé")
 
     def _initialize_deepface(self):
-        """Initialise DeepFace avec pré-chargement du modèle"""
+        """Initialise DeepFace"""
         try:
             from deepface import DeepFace
             import numpy as np
             from PIL import Image
 
-            logger.debug("Pré-chargement DeepFace VGG-Face...")
+            logger.debug("Pré-chargement de DeepFace VGG-Face")
 
             # Créer une image dummy pour forcer le chargement du modèle
             dummy_image = np.ones((224, 224, 3), dtype=np.uint8) * 128
@@ -104,9 +104,9 @@ class AIModelManager:
                                          model_name='VGG-Face',
                                          distance_metric='cosine',
                                          enforce_detection=False)
-                logger.debug("DeepFace VGG-Face pré-chargé avec succès")
+                logger.debug("DeepFace VGG-Face pré-chargé")
             except Exception as e:
-                logger.debug(f"DeepFace initialisé (erreur dummy normale): {e}")
+                logger.debug(f"DeepFace initialisé: {e}")
             finally:
                 # Nettoyer
                 try:
@@ -118,15 +118,15 @@ class AIModelManager:
             logger.info(" DeepFace prêt")
 
         except Exception as e:
-            logger.error(f" Erreur initialisation DeepFace: {e}")
+            logger.error(f" Erreur initialisation de DeepFace: {e}")
             self.deepface_ready = False
             raise
 
     def _initialize_easyocr(self):
-        """Initialise EasyOCR avec cache global"""
+        """Initialise EasyOCR """
         try:
             import easyocr
-            logger.debug("Création EasyOCR Reader...")
+            logger.debug("Création EasyOCR Reader")
 
             self.easyocr_reader = easyocr.Reader(['en', 'fr'], gpu=False)
             logger.info(" EasyOCR Reader créé et mis en cache")
@@ -137,7 +137,7 @@ class AIModelManager:
             raise
 
     def _initialize_others(self):
-        """Initialise autres dépendances"""
+        """Initialise le reste des dépendances"""
         try:
             # Import pour s'assurer que tout est disponible
             import passporteye
@@ -156,7 +156,7 @@ class AIModelManager:
             # Ne pas lever l'exception pour les dépendances optionnelles
 
 class DocumentProcessor:
-    """Processeur de documents réutilisant les modèles chargés"""
+    """Processeur de documents pour les modèles chargés"""
 
     def __init__(self, model_manager: AIModelManager):
         self.model_manager = model_manager
@@ -165,9 +165,9 @@ class DocumentProcessor:
 
         # Import du module d'extraction existant avec gestion d'erreur
         try:
-            logger.info(" Import du module document_extractor...")
+            logger.info(" Import de document_extractor")
 
-            # Méthode plus robuste d'import
+            #import
             import importlib.util
             extractor_path = os.path.join(script_dir, "document_extractor.py")
 
@@ -226,29 +226,29 @@ class DocumentProcessor:
             }
 
     def process_recto_verso(self, recto_path: str, verso_path: str) -> Dict[str, Any]:
-        """Traite recto/verso d'une carte d'identité"""
+        """cas recto/verso d'une carte d'identité"""
         try:
             logger.info(f" Traitement recto/verso: {recto_path} + {verso_path}")
 
             if not self.extract_document_both_sides:
-                raise RuntimeError("Module d'extraction recto/verso non initialisé")
+                raise RuntimeError("Module d'extraction non initialisé")
 
             # Utiliser le reader EasyOCR global si disponible
             if self.model_manager.easyocr_reader:
                 try:
                     import document_extractor
                     document_extractor._EASYOCR_READER_CACHE = self.model_manager.easyocr_reader
-                    logger.debug("EasyOCR reader global configuré pour recto/verso")
+                    logger.debug("EasyOCR reader global configuré ")
                 except:
-                    logger.debug("Impossible de configurer EasyOCR reader global pour recto/verso")
+                    logger.debug("Impossible de configurer EasyOCR reader global")
 
             result = self.extract_document_both_sides(recto_path, verso_path)
 
-            logger.info(f" Recto/verso traité - Status: {result.get('status', 'unknown')}")
+            logger.info(f" extraction traité - Status: {result.get('status', 'unknown')}")
             return result
 
         except Exception as e:
-            logger.error(f" Erreur traitement recto/verso: {e}")
+            logger.error(f" Erreur traitement : {e}")
             logger.error(f" Traceback: {traceback.format_exc()}")
             return {
                 'status': 'error',
@@ -319,7 +319,7 @@ services_initialized = False
 init_lock = threading.Lock()
 
 def initialize_services():
-    """Initialise les services de façon thread-safe avec gestion d'erreur robuste"""
+    """Initialise les services"""
     global model_manager, document_processor, face_comparator, services_initialized
 
     with init_lock:
@@ -330,20 +330,20 @@ def initialize_services():
         logger.info(" Initialisation des services...")
 
         try:
-            # 1. Initialiser le gestionnaire de modèles
+            # Initialiser le gestionnaire de modèles
             logger.info("Initialisation AIModelManager...")
             model_manager = AIModelManager()
 
-            # 2. Initialiser le processeur de documents
-            logger.info(" Initialisation DocumentProcessor...")
+            # Initialiser le processeur de documents
+            logger.info(" Initialisation DocumentProcessor")
             document_processor = DocumentProcessor(model_manager)
 
-            # 3. Initialiser le comparateur de visages
-            logger.info(" Initialisation FaceComparator...")
+            # Initialiser le comparateur de visages
+            logger.info(" Initialisation FaceComparator")
             face_comparator = FaceComparator(model_manager)
 
             services_initialized = True
-            logger.info(" Tous les services sont initialisés avec succès!")
+            logger.info(" Tous les services sont initialisés")
             return True
 
         except Exception as e:
@@ -360,17 +360,17 @@ def initialize_services():
 
 @app.before_request
 def ensure_services_initialized():
-    """S'assure que les services sont initialisés avant chaque requête"""
+    """S'assure que les services sont initialisés"""
     if not services_initialized:
-        logger.debug(" Services non initialisés, initialisation en cours...")
+        logger.debug(" Services non initialisés, initialisation en cours")
         success = initialize_services()
         if not success:
             logger.error(" Impossible d'initialiser les services")
-            # On continue quand même pour permettre les endpoints de santé
+            # On continue pour permettre les endpoints de santé
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Endpoint de santé avec informations détaillées"""
+    """Endpoint de santé"""
     try:
         health_data = {
             'status': 'healthy' if services_initialized else 'degraded',

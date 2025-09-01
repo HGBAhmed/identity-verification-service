@@ -1,66 +1,149 @@
-﻿services:
-  # Base de données OpenKM
-  openkm-db:
+﻿#services:
+#  # Base de données OpenKM
+#  openkm-db:
+#    image: postgres:15-alpine
+#    container_name: openkm-db
+#    environment:
+#      POSTGRES_DB: openkm
+#      POSTGRES_USER: postgres
+#      POSTGRES_PASSWORD: postgres
+#    ports:
+#      - "5433:5432"  # Port différent pour éviter conflit
+#    volumes:
+#      - openkm_db_data:/var/lib/postgresql/data
+#    restart: unless-stopped
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U postgres -d openkm"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#
+#  # OpenKM Application
+#  openkm:
+#    image: openkm/openkm-ce:6.3.12
+#    container_name: openkm-app
+#    environment:
+#      # Configuration base de données
+#      OPENKM_DB_HOST: openkm-db
+#      OPENKM_DB_PORT: 5432
+#      OPENKM_DB_NAME: openkm
+#      OPENKM_DB_USER: postgres
+#      OPENKM_DB_PASS: postgres
+#
+#      # Configuration OpenKM
+#      OPENKM_ADMIN_USER: okmAdmin
+#      OPENKM_ADMIN_PASS: admin
+#      OPENKM_CONTEXT: OpenKM
+#
+#      # Configuration Java
+#      JAVA_OPTS: "-Xmx2g -Xms1g"
+#
+#      # Configuration repository
+#      OPENKM_REPOSITORY_PATH: /opt/openkm/repository
+#
+#    ports:
+#      - "8090:8080"  # OpenKm port 8090
+#    volumes:
+#      - openkm_data:/opt/openkm/repository
+#      - openkm_logs:/opt/openkm/logs
+#    depends_on:
+#      openkm-db:
+#        condition: service_healthy
+#    restart: unless-stopped
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 120s
+#
+#volumes:
+#  openkm_db_data:
+#    driver: local
+#  openkm_data:
+#    driver: local
+#  openkm_logs:
+#    driver: local
+
+services:
+  postgres:
     image: postgres:15-alpine
-    container_name: openkm-db
     environment:
-      POSTGRES_DB: openkm
+      POSTGRES_DB: identity_verification
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5433:5432"  # Port différent pour éviter conflit
+      POSTGRES_PASSWORD: MDP
     volumes:
-      - openkm_db_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d openkm"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - identity-network
 
-  # OpenKM Application
-  openkm:
-    image: openkm/openkm-ce:6.3.12
-    container_name: openkm-app
+  identity-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.java
     environment:
-      # Configuration base de données
-      OPENKM_DB_HOST: openkm-db
-      OPENKM_DB_PORT: 5432
-      OPENKM_DB_NAME: openkm
-      OPENKM_DB_USER: postgres
-      OPENKM_DB_PASS: postgres
-
-      # Configuration OpenKM
-      OPENKM_ADMIN_USER: okmAdmin
-      OPENKM_ADMIN_PASS: admin
-      OPENKM_CONTEXT: OpenKM
-
-      # Configuration Java
-      JAVA_OPTS: "-Xmx2g -Xms1g"
-
-      # Configuration repository
-      OPENKM_REPOSITORY_PATH: /opt/openkm/repository
-
-    ports:
-      - "8090:8080"  # OpenKm port 8090
+      DB_HOST: postgres
+      DB_USERNAME: postgres
+      DB_PASSWORD: MDP
+      OPENKM_BASE_URL: http://openkm:8080/OpenKM
+      OPENKM_USERNAME: okmAdmin
+      OPENKM_PASSWORD: admin
     volumes:
-      - openkm_data:/opt/openkm/repository
-      - openkm_logs:/opt/openkm/logs
+      - shared_temp:/app/shared-temp
+    ports:
+      - "8080:8080"
+    networks:
+      - identity-network
     depends_on:
-      openkm-db:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
+      - postgres
+      - ai-server
+
+  ai-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - shared_temp:/app/shared-temp
+    ports:
+      - "5000:5000"
+    networks:
+      - identity-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.1
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: MDP
+      KC_HOSTNAME: localhost
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: MDP
+      KC_HTTP_ENABLED: true
+      KC_HTTPS_ENABLED: false
+    ports:
+      - "8090:8080"
+    networks:
+      - identity-network
+    depends_on:
+      - postgres
+    command: start-dev
+
+  openkm:
+    image: openkm/openkm-ce
+    volumes:
+      - openkm_data:/opt/tomcat
+    ports:
+      - "8088:8080"
+    networks:
+      - identity-network
 
 volumes:
-  openkm_db_data:
-    driver: local
+  postgres_data:
+  shared_temp:
   openkm_data:
-    driver: local
-  openkm_logs:
-    driver: local
+
+networks:
+  identity-network:
